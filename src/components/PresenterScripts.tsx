@@ -28,32 +28,54 @@ export function PresenterScripts({
   onApplyCorrection,
   isListening,
 }: PresenterScriptsProps) {
-  const [expandedId, setExpandedId] = useState<string>(PRESENTER_SCRIPTS[0].id);
+  const [sectionOpen, setSectionOpen] = useState(false);
+  const [expandedId, setExpandedId] = useState('');
 
   const toggle = (id: string) => {
     setExpandedId((prev) => (prev === id ? '' : id));
   };
 
   return (
-    <div className="mb-4 space-y-2">
-      <div className="flex items-center gap-2">
-        <BookOpen className="h-3.5 w-3.5 text-indigo-400" />
-        <p className="text-xs font-semibold uppercase tracking-wider text-indigo-400">
-          Presenter Scripts
-        </p>
-      </div>
-      <p className="text-[11px] leading-relaxed text-surface-muted">
-        Tap the mic and read aloud — or simulate what STT heard, then apply the human correction.
-      </p>
+    <div className="overflow-hidden rounded-xl border border-surface-border bg-surface-raised/30">
+      <button
+        type="button"
+        onClick={() => setSectionOpen((open) => !open)}
+        className="flex w-full items-center justify-between gap-2 p-3 text-left transition hover:bg-surface-raised/50"
+        aria-expanded={sectionOpen}
+      >
+        <div className="flex min-w-0 items-center gap-2">
+          <BookOpen className="h-3.5 w-3.5 shrink-0 text-indigo-400" />
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-wider text-indigo-400">
+              Presenter Scripts
+            </p>
+            <p className="mt-0.5 truncate text-[10px] text-surface-muted">
+              Optional — read-aloud & HITL demo flows
+            </p>
+          </div>
+        </div>
+        {sectionOpen ? (
+          <ChevronUp className="h-4 w-4 shrink-0 text-surface-muted" />
+        ) : (
+          <ChevronDown className="h-4 w-4 shrink-0 text-surface-muted" />
+        )}
+      </button>
 
-      <div className="max-h-[340px] space-y-2 overflow-y-auto pr-1">
-        {PRESENTER_SCRIPTS.map((script) => {
-          const isOpen = expandedId === script.id;
-          return (
-            <div
-              key={script.id}
-              className="overflow-hidden rounded-xl border border-surface-border bg-surface-raised/40"
-            >
+      {sectionOpen && (
+        <div className="space-y-2 border-t border-surface-border px-3 pb-3 pt-2">
+          <p className="text-[11px] leading-relaxed text-surface-muted">
+            Tap the mic and read aloud — or simulate what STT heard, then apply the human
+            correction.
+          </p>
+
+          <div className="max-h-[280px] space-y-2 overflow-y-auto pr-1">
+            {PRESENTER_SCRIPTS.map((script) => {
+              const isOpen = expandedId === script.id;
+              return (
+                <div
+                  key={script.id}
+                  className="overflow-hidden rounded-xl border border-surface-border bg-surface-raised/40"
+                >
               <button
                 type="button"
                 onClick={() => toggle(script.id)}
@@ -98,7 +120,7 @@ export function PresenterScripts({
 
                   <div className="rounded-lg border border-surface-border bg-[#0d0e10]/60 p-2.5">
                     <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-surface-muted">
-                      Say to the panel
+                      Notes to the panel
                     </p>
                     <p className="text-[11px] italic leading-relaxed text-white/70">
                       {script.presenterCue}
@@ -150,10 +172,12 @@ export function PresenterScripts({
                   </div>
                 </div>
               )}
-            </div>
-          );
-        })}
-      </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

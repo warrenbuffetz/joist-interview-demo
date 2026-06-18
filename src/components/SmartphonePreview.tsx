@@ -1,17 +1,22 @@
+import { useEffect, useState } from 'react';
 import {
   CheckCircle2,
   AlertTriangle,
   Smartphone,
   FileText,
-  Wifi,
-  Battery,
-  Signal,
 } from 'lucide-react';
-import type { HandshakeResult, TrustStatus } from '../engine/handshakeEngine';
+import type { HandshakeResult, InvoiceLineItem, TrustStatus } from '../engine/handshakeEngine';
+import { PhoneChrome } from './phone/PhoneChrome';
+import { InvoiceMediationScreen } from './phone/InvoiceMediationScreen';
+import { InvoiceSuccessScreen } from './phone/InvoiceSuccessScreen';
+import { computeInvoiceTotals } from '../utils/invoiceTotals';
+
+type PhoneView = 'invoice' | 'mediation' | 'success';
 
 interface SmartphonePreviewProps {
   result: HandshakeResult | null;
   workflowStage: 'idle' | 'listening' | 'drafting' | 'complete';
+  onReset: () => void;
 }
 
 function StatusBadge({ status }: { status: TrustStatus }) {
@@ -23,7 +28,6 @@ function StatusBadge({ status }: { status: TrustStatus }) {
       </div>
     );
   }
-
   if (status === 'amber_alert') {
     return (
       <div className="flex items-center gap-1 rounded-full bg-trust-amber/20 px-2 py-0.5">
@@ -32,22 +36,80 @@ function StatusBadge({ status }: { status: TrustStatus }) {
       </div>
     );
   }
-
   return null;
 }
 
-export function SmartphonePreview({ result, workflowStage }: SmartphonePreviewProps) {
-  const status = result?.status ?? 'idle';
+function AppHeader({ status }: { status?: TrustStatus }) {
+  return (
+    <div className="flex items-center justify-between">
+      <div className="flex items-center gap-2">
+        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-600">
+          <FileText className="h-3.5 w-3.5 text-white" />
+        </div>
+        <div>
+          <p className="text-xs font-bold text-gray-900">Joist Invoice</p>
+          <p className="text-[9px] text-gray-400">Autonomous Assistant</p>
+        </div>
+      </div>
+      {status && <StatusBadge status={status} />}
+    </div>
+  );
+}
+
+export function SmartphonePreview({ result, workflowStage, onReset }: SmartphonePreviewProps) {
+  const [phoneView, setPhoneView] = useState<PhoneView>('invoice');
+  const [resolvedResult, setResolvedResult] = useState<HandshakeResult | null>(null);
+  const [sentMeta, setSentMeta] = useState({ total: 0, lineCount: 0, invoiceNumber: 'INV-000000' });
+
+  const isLoading = !result && (workflowStage === 'listening' || workflowStage === 'drafting');
+
+  // Reset phone flow when a new handshake result arrives
+  useEffect(() => {
+    if (result) {
+      setPhoneView('invoice');
+      setResolvedResult(null);
+    }
+  }, [result?.transcript, result?.status]);
+
+  const displayResult = resolvedResult ?? result;
+  const status = displayResult?.status ?? 'idle';
   const isVerified = status === 'verified';
-  const isAmber = status === 'amber_alert';
-  const isLoading =
-    !result && (workflowStage === 'listening' || workflowStage === 'drafting');
+  const isAmber = status === 'amber_alert' && !resolvedResult;
 
   const borderGlow = isVerified
     ? 'shadow-glow border-trust-verified/40'
     : isAmber
       ? 'shadow-glow-amber border-trust-amber/40'
-      : 'border-surface-border';
+      : phoneView === 'success'
+        ? 'shadow-glow border-trust-verified/40'
+        : 'border-surface-border';
+
+  const handleMediationConfirm = (lineItems: InvoiceLineItem[]) => {
+    if (!result) return;
+    const { subtotal, tax, total } = computeInvoiceTotals(lineItems);
+    const verified: HandshakeResult = {
+      ...result,
+      status: 'verified',
+      lineItems,
+      gaps: [],
+      subtotal,
+      tax,
+      total,
+      trustScore: 1,
+    };
+    setResolvedResult(verified);
+    setPhoneView('invoice');
+  };
+
+  const handleSend = () => {
+    if (!displayResult) return;
+    setSentMeta({
+      total: displayResult.total,
+      lineCount: displayResult.lineItems.length,
+      invoiceNumber: `INV-${Date.now().toString().slice(-6)}`,
+    });
+    setPhoneView('success');
+  };
 
   return (
     <div className="flex h-full flex-col">
@@ -64,165 +126,161 @@ export function SmartphonePreview({ result, workflowStage }: SmartphonePreviewPr
         </p>
       </header>
 
-      <div className="flex flex-1 items-center justify-center">
-        <div
-          className={`relative w-[280px] rounded-[2.5rem] border-[3px] bg-[#0a0a0c] p-3 transition-shadow duration-500 ${borderGlow}`}
+      <div className="flex flex-1 flex-col items-center justify-center py-4">
+        <PhoneChrome
+          borderGlow={borderGlow}
+          headerRight={
+            phoneView === 'invoice' && displayResult ? (
+              <AppHeader status={displayResult.status} />
+            ) : phoneView === 'mediation' ? undefined : phoneView === 'success' ? undefined : (
+              <AppHeader />
+            )
+          }
         >
-          <div className="absolute left-1/2 top-3 z-10 h-5 w-24 -translate-x-1/2 rounded-full bg-black" />
-
-          <div className="overflow-hidden rounded-[2rem] bg-white">
-            <div className="flex items-center justify-between bg-gray-50 px-5 pb-1 pt-8 text-[10px] text-gray-600">
-              <span className="font-medium">9:41</span>
-              <div className="flex items-center gap-1">
-                <Signal className="h-3 w-3" />
-                <Wifi className="h-3 w-3" />
-                <Battery className="h-3 w-3" />
-              </div>
+          {isLoading && (
+            <div className="flex flex-col items-center justify-center bg-gray-50 px-4 py-16">
+              <div className="mb-4 h-10 w-10 animate-spin rounded-full border-2 border-indigo-200 border-t-indigo-600" />
+              <p className="text-xs font-medium text-gray-600">
+                {workflowStage === 'listening' ? 'Listening…' : 'Drafting Invoice…'}
+              </p>
             </div>
+          )}
 
-            <div className="border-b border-gray-100 bg-white px-4 py-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-600">
-                    <FileText className="h-3.5 w-3.5 text-white" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-bold text-gray-900">Joist Invoice</p>
-                    <p className="text-[9px] text-gray-400">Autonomous Assistant</p>
-                  </div>
-                </div>
-                {result && <StatusBadge status={result.status} />}
+          {!result && !isLoading && phoneView === 'invoice' && (
+            <div className="flex flex-col items-center justify-center bg-gray-50 px-4 py-16 text-center">
+              <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-gray-200">
+                <MicPlaceholder />
               </div>
+              <p className="text-xs font-medium text-gray-500">Awaiting voice input</p>
+              <p className="mt-1 text-[10px] text-gray-400">Invoice will draft automatically</p>
             </div>
+          )}
 
-            <div className="min-h-[380px] bg-gray-50 p-4">
-              {isLoading && (
-                <div className="flex flex-col items-center justify-center py-16">
-                  <div className="mb-4 h-10 w-10 animate-spin rounded-full border-2 border-indigo-200 border-t-indigo-600" />
-                  <p className="text-xs font-medium text-gray-600">
-                    {workflowStage === 'listening' ? 'Listening…' : 'Drafting Invoice…'}
-                  </p>
-                </div>
-              )}
+          {phoneView === 'mediation' && result && (
+            <InvoiceMediationScreen
+              result={result}
+              onConfirm={handleMediationConfirm}
+              onBack={() => setPhoneView('invoice')}
+            />
+          )}
 
-              {!result && !isLoading && (
-                <div className="flex flex-col items-center justify-center py-16 text-center">
-                  <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-gray-200">
-                    <MicPlaceholder />
-                  </div>
-                  <p className="text-xs font-medium text-gray-500">Awaiting voice input</p>
-                  <p className="mt-1 text-[10px] text-gray-400">
-                    Invoice will draft automatically
-                  </p>
-                </div>
-              )}
+          {phoneView === 'success' && (
+            <InvoiceSuccessScreen
+              total={sentMeta.total}
+              invoiceNumber={sentMeta.invoiceNumber}
+              clientName="Sarah M. — Kitchen Remodel"
+              lineCount={sentMeta.lineCount}
+              onDone={() => {
+                setPhoneView('invoice');
+                setResolvedResult(null);
+                onReset();
+              }}
+            />
+          )}
 
-              {result && (
-                <div>
-                  {isAmber && (
-                    <div className="mb-3 rounded-xl border border-trust-amber/40 bg-amber-50 p-2.5">
-                      <div className="flex items-start gap-2">
-                        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
-                        <div>
-                          <p className="text-[10px] font-semibold text-amber-800">
-                            Amber Alert — Manual Review
-                          </p>
-                          <p className="mt-0.5 text-[9px] text-amber-700">
-                            {result.gaps[0]?.message ?? 'Trust gaps detected in voice input.'}
-                          </p>
-                        </div>
-                      </div>
+          {phoneView === 'invoice' && displayResult && (
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-gray-50 p-4">
+              {isAmber && (
+                <div className="mb-3 rounded-xl border border-trust-amber/40 bg-amber-50 p-2.5">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
+                    <div>
+                      <p className="text-[10px] font-semibold text-amber-800">
+                        Amber Alert — Manual Review
+                      </p>
+                      <p className="mt-0.5 text-[9px] text-amber-700">
+                        {displayResult.gaps[0]?.message ?? 'Trust gaps detected in voice input.'}
+                      </p>
                     </div>
-                  )}
+                  </div>
+                </div>
+              )}
 
-                  {isVerified && (
-                    <div className="mb-3 rounded-xl border border-green-200 bg-green-50 p-2.5">
-                      <div className="flex items-center gap-2">
-                        <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
-                        <p className="text-[10px] font-semibold text-green-800">
-                          Catalog Verified — Ready to Send
+              {isVerified && (
+                <div className="mb-3 rounded-xl border border-green-200 bg-green-50 p-2.5">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
+                    <p className="text-[10px] font-semibold text-green-800">
+                      {resolvedResult
+                        ? 'Human Verified — Ready to Send'
+                        : 'Catalog Verified — Ready to Send'}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <p className="mb-1 text-[10px] font-medium text-gray-400">INVOICE #JOIST-2026</p>
+              <p className="mb-3 text-sm font-bold text-gray-900">
+                {isVerified ? 'Verified Draft' : isAmber ? 'Draft — Needs Review' : 'Draft'}
+              </p>
+
+              <div className="max-h-[140px] space-y-2 overflow-y-auto">
+                {displayResult.lineItems.length > 0 ? (
+                  displayResult.lineItems.map((item) => (
+                    <div key={item.sku} className="rounded-lg bg-white p-2.5 shadow-sm">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-[10px] font-semibold text-gray-800">
+                            {item.name}
+                          </p>
+                          <p className="text-[9px] text-gray-400">{item.sku}</p>
+                        </div>
+                        <p className="shrink-0 text-[10px] font-bold text-gray-900">
+                          ${item.lineTotal.toFixed(2)}
                         </p>
                       </div>
+                      <p className="mt-1 text-[9px] text-gray-400">
+                        {item.quantity} {item.unit} × ${item.unitPrice.toFixed(2)}
+                      </p>
                     </div>
-                  )}
-
-                  <p className="mb-1 text-[10px] font-medium text-gray-400">INVOICE #JOIST-2026</p>
-                  <p className="mb-3 text-sm font-bold text-gray-900">
-                    {isVerified ? 'Verified Draft' : isAmber ? 'Draft — Needs Review' : 'Draft'}
-                  </p>
-
-                  <div className="mb-3 space-y-2">
-                    {result.lineItems.length > 0 ? (
-                      result.lineItems.map((item) => (
-                        <div key={item.sku} className="rounded-lg bg-white p-2.5 shadow-sm">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <p className="truncate text-[10px] font-semibold text-gray-800">
-                                {item.name}
-                              </p>
-                              <p className="text-[9px] text-gray-400">{item.sku}</p>
-                            </div>
-                            <p className="shrink-0 text-[10px] font-bold text-gray-900">
-                              ${item.lineTotal.toFixed(2)}
-                            </p>
-                          </div>
-                          <p className="mt-1 text-[9px] text-gray-400">
-                            {item.quantity} {item.unit} × ${item.unitPrice.toFixed(2)}
-                          </p>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="rounded-lg bg-white p-3 text-center shadow-sm">
-                        <p className="text-[10px] text-gray-400">No catalog matches found</p>
-                      </div>
-                    )}
+                  ))
+                ) : (
+                  <div className="rounded-lg bg-white p-3 text-center shadow-sm">
+                    <p className="text-[10px] text-gray-400">No catalog matches found</p>
                   </div>
+                )}
+              </div>
 
-                  <div className="rounded-xl bg-white p-3 shadow-sm">
-                    <div className="flex justify-between text-[10px] text-gray-500">
-                      <span>Subtotal</span>
-                      <span>${result.subtotal.toFixed(2)}</span>
-                    </div>
-                    <div className="mt-1 flex justify-between text-[10px] text-gray-500">
-                      <span>Tax (8.25%)</span>
-                      <span>${result.tax.toFixed(2)}</span>
-                    </div>
-                    <div className="mt-2 flex justify-between border-t border-gray-100 pt-2">
-                      <span className="text-xs font-bold text-gray-900">Total</span>
-                      <span
-                        className={`text-xs font-bold ${isVerified ? 'text-green-600' : isAmber ? 'text-amber-600' : 'text-gray-900'}`}
-                      >
-                        ${result.total.toFixed(2)}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="mt-3 flex items-center justify-between rounded-lg bg-white px-3 py-2 shadow-sm">
-                    <span className="text-[9px] text-gray-400">Trust Score</span>
-                    <span
-                      className={`text-[10px] font-bold ${isVerified ? 'text-green-600' : isAmber ? 'text-amber-600' : 'text-gray-600'}`}
-                    >
-                      {(result.trustScore * 100).toFixed(0)}%
-                    </span>
-                  </div>
-
-                  <button
-                    type="button"
-                    className={`mt-3 w-full rounded-xl py-2.5 text-xs font-semibold text-white ${
-                      isVerified ? 'bg-green-500' : isAmber ? 'bg-amber-500' : 'bg-indigo-600'
-                    }`}
-                  >
-                    {isVerified ? 'Send to Client' : isAmber ? 'Review & Correct' : 'Preview'}
-                  </button>
+              <div className="rounded-xl bg-white p-3 shadow-sm">
+                <div className="flex justify-between text-[10px] text-gray-500">
+                  <span>Subtotal</span>
+                  <span>${displayResult.subtotal.toFixed(2)}</span>
                 </div>
-              )}
-            </div>
+                <div className="mt-1 flex justify-between text-[10px] text-gray-500">
+                  <span>Tax (8.25%)</span>
+                  <span>${displayResult.tax.toFixed(2)}</span>
+                </div>
+                <div className="mt-2 flex justify-between border-t border-gray-100 pt-2">
+                  <span className="text-xs font-bold text-gray-900">Total</span>
+                  <span
+                    className={`text-xs font-bold ${isVerified ? 'text-green-600' : isAmber ? 'text-amber-600' : 'text-gray-900'}`}
+                  >
+                    ${displayResult.total.toFixed(2)}
+                  </span>
+                </div>
+              </div>
 
-            <div className="flex justify-center bg-gray-50 py-2">
-              <div className="h-1 w-24 rounded-full bg-gray-300" />
+              <div className="mt-3 flex items-center justify-between rounded-lg bg-white px-3 py-2 shadow-sm">
+                <span className="text-[9px] text-gray-400">Trust Score</span>
+                <span
+                  className={`text-[10px] font-bold ${isVerified ? 'text-green-600' : isAmber ? 'text-amber-600' : 'text-gray-600'}`}
+                >
+                  {(displayResult.trustScore * 100).toFixed(0)}%
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={isAmber ? () => setPhoneView('mediation') : handleSend}
+                className={`mt-3 w-full rounded-xl py-2.5 text-xs font-semibold text-white transition active:scale-[0.98] ${
+                  isVerified ? 'bg-green-500 hover:bg-green-600' : isAmber ? 'bg-amber-500 hover:bg-amber-600' : 'bg-indigo-600'
+                }`}
+              >
+                {isVerified ? 'Send to Client' : isAmber ? 'Review & Correct' : 'Preview'}
+              </button>
             </div>
-          </div>
-        </div>
+          )}
+        </PhoneChrome>
       </div>
     </div>
   );

@@ -170,7 +170,11 @@ function App() {
           </section>
 
           <section className="flex min-h-[480px] flex-col overflow-y-auto rounded-2xl border border-surface-border bg-surface-raised/50 p-6 lg:min-h-0">
-            <SmartphonePreview result={handshakeResult} workflowStage={workflowStage} />
+            <SmartphonePreview
+              result={handshakeResult}
+              workflowStage={workflowStage}
+              onReset={handleReset}
+            />
           </section>
         </div>
       </main>

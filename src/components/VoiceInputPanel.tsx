@@ -137,12 +137,6 @@ export function VoiceInputPanel({
       )}
 
       <footer className="mt-auto space-y-3 border-t border-surface-border pt-4">
-        <PresenterScripts
-          onSimulateStt={onSimulateStt}
-          onApplyCorrection={onApplyCorrection}
-          isListening={isListening}
-        />
-
         <p className="text-xs text-surface-muted">Quick shortcuts</p>
         <div className="flex gap-2">
           <button
@@ -160,6 +154,13 @@ export function VoiceInputPanel({
             ⚠ Amber scenario
           </button>
         </div>
+
+        <PresenterScripts
+          onSimulateStt={onSimulateStt}
+          onApplyCorrection={onApplyCorrection}
+          isListening={isListening}
+        />
+
         <button
           type="button"
           onClick={onReset}
