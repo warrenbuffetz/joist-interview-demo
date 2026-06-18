@@ -1,5 +1,6 @@
 import { Mic, MicOff, RotateCcw, Sparkles, AlertCircle } from 'lucide-react';
 import type { TranscriptionStatus } from '../hooks/useSpeechToText';
+import { PresenterScripts } from './PresenterScripts';
 
 const STATUS_LABELS: Record<TranscriptionStatus, string> = {
   idle: 'Ready to capture',
@@ -31,6 +32,8 @@ interface VoiceInputPanelProps {
   onReset: () => void;
   onDemoVerified: () => void;
   onDemoAmber: () => void;
+  onSimulateStt: (transcript: string) => void;
+  onApplyCorrection: (transcript: string) => void;
 }
 
 export function VoiceInputPanel({
@@ -45,6 +48,8 @@ export function VoiceInputPanel({
   onReset,
   onDemoVerified,
   onDemoAmber,
+  onSimulateStt,
+  onApplyCorrection,
 }: VoiceInputPanelProps) {
   const displayText = interimTranscript || finalTranscript;
   const isActive = isListening || status === 'transcribing' || status === 'mapping';
@@ -132,7 +137,13 @@ export function VoiceInputPanel({
       )}
 
       <footer className="mt-auto space-y-3 border-t border-surface-border pt-4">
-        <p className="text-xs text-surface-muted">Demo shortcuts (no mic needed)</p>
+        <PresenterScripts
+          onSimulateStt={onSimulateStt}
+          onApplyCorrection={onApplyCorrection}
+          isListening={isListening}
+        />
+
+        <p className="text-xs text-surface-muted">Quick shortcuts</p>
         <div className="flex gap-2">
           <button
             type="button"

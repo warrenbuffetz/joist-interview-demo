@@ -160,6 +160,8 @@ function App() {
               onReset={handleReset}
               onDemoVerified={handleDemoVerified}
               onDemoAmber={handleDemoAmber}
+              onSimulateStt={processTranscript}
+              onApplyCorrection={processTranscript}
             />
           </section>
 
