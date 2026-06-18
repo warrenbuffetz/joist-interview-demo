@@ -1,0 +1,216 @@
+import { motion, AnimatePresence } from 'framer-motion';
+import { Mic, MicOff, RotateCcw, Sparkles, AlertCircle } from 'lucide-react';
+import type { TranscriptionStatus } from '../hooks/useSpeechToText';
+
+const STATUS_LABELS: Record<TranscriptionStatus, string> = {
+  idle: 'Ready to capture',
+  listening: 'Listening…',
+  transcribing: 'Transcribing…',
+  mapping: 'Mapping to Catalog…',
+  error: 'Error',
+  unsupported: 'Browser not supported',
+};
+
+const STATUS_COLORS: Record<TranscriptionStatus, string> = {
+  idle: 'text-surface-muted',
+  listening: 'text-indigo-400',
+  transcribing: 'text-amber-300',
+  mapping: 'text-trust-verified',
+  error: 'text-trust-error',
+  unsupported: 'text-trust-error',
+};
+
+interface VoiceInputPanelProps {
+  status: TranscriptionStatus;
+  interimTranscript: string;
+  finalTranscript: string;
+  isListening: boolean;
+  isSupported: boolean;
+  error: string | null;
+  onStart: () => void;
+  onStop: () => void;
+  onReset: () => void;
+  onDemoVerified: () => void;
+  onDemoAmber: () => void;
+}
+
+export function VoiceInputPanel({
+  status,
+  interimTranscript,
+  finalTranscript,
+  isListening,
+  isSupported,
+  error,
+  onStart,
+  onStop,
+  onReset,
+  onDemoVerified,
+  onDemoAmber,
+}: VoiceInputPanelProps) {
+  const displayText = interimTranscript || finalTranscript;
+  const isActive = isListening || status === 'transcribing' || status === 'mapping';
+
+  return (
+    <div className="flex h-full flex-col">
+      <header className="mb-6">
+        <div className="mb-1 flex items-center gap-2">
+          <Sparkles className="h-4 w-4 text-indigo-400" />
+          <span className="text-xs font-semibold uppercase tracking-widest text-indigo-400">
+            Column 1
+          </span>
+        </div>
+        <h2 className="text-xl font-semibold tracking-tight">Voice Input Interface</h2>
+        <p className="mt-1 text-sm text-surface-muted">
+          Speak naturally — Joist maps your words to verified catalog SKUs.
+        </p>
+      </header>
+
+      <div className="flex flex-1 flex-col items-center justify-center">
+        <div className="relative mb-8">
+          {/* Pulsating rings */}
+          <AnimatePresence>
+            {isListening && (
+              <>
+                {[0, 1, 2].map((i) => (
+                  <motion.div
+                    key={i}
+                    className="absolute inset-0 rounded-full border-2 border-indigo-500/40"
+                    initial={{ scale: 1, opacity: 0.6 }}
+                    animate={{ scale: 2.2 + i * 0.4, opacity: 0 }}
+                    transition={{
+                      duration: 2,
+                      repeat: Infinity,
+                      delay: i * 0.5,
+                      ease: 'easeOut',
+                    }}
+                  />
+                ))}
+              </>
+            )}
+          </AnimatePresence>
+
+          <motion.button
+            type="button"
+            disabled={!isSupported}
+            onClick={isListening ? onStop : onStart}
+            className={`relative z-10 flex h-36 w-36 items-center justify-center rounded-full transition-shadow duration-300 ${
+              isListening
+                ? 'bg-gradient-to-br from-indigo-500 to-violet-600 shadow-glow-voice'
+                : 'bg-gradient-to-br from-surface-raised to-surface-border hover:from-indigo-600 hover:to-violet-700 hover:shadow-glow-voice'
+            } ${!isSupported ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+            whileTap={{ scale: 0.95 }}
+            animate={
+              isListening
+                ? { scale: [1, 1.04, 1], boxShadow: ['0 0 0 0 rgba(99,102,241,0.4)', '0 0 0 20px rgba(99,102,241,0)', '0 0 0 0 rgba(99,102,241,0)'] }
+                : { scale: 1 }
+            }
+            transition={
+              isListening
+                ? { duration: 1.5, repeat: Infinity, ease: 'easeInOut' }
+                : { duration: 0.2 }
+            }
+            aria-label={isListening ? 'Stop voice capture' : 'Start voice capture'}
+          >
+            {isListening ? (
+              <MicOff className="h-12 w-12 text-white" />
+            ) : (
+              <Mic className="h-12 w-12 text-white" />
+            )}
+          </motion.button>
+        </div>
+
+        <motion.div
+          className="mb-4 flex items-center gap-2"
+          key={status}
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3 }}
+        >
+          {isActive && (
+            <motion.span
+              className="h-2 w-2 rounded-full bg-indigo-400"
+              animate={{ opacity: [1, 0.3, 1] }}
+              transition={{ duration: 1, repeat: Infinity }}
+            />
+          )}
+          <span className={`text-sm font-medium ${STATUS_COLORS[status]}`}>
+            {STATUS_LABELS[status]}
+          </span>
+        </motion.div>
+
+        <p className="mb-6 text-center text-xs text-surface-muted">
+          {isListening ? 'Tap again to stop · Speak clearly' : 'Tap to begin voice capture'}
+        </p>
+
+        {/* Live transcript preview */}
+        <div className="w-full rounded-2xl border border-surface-border bg-surface-raised/60 p-4 backdrop-blur-sm">
+          <p className="mb-2 text-xs font-medium uppercase tracking-wider text-surface-muted">
+            Live Transcript
+          </p>
+          <div className="min-h-[72px]">
+            <AnimatePresence mode="wait">
+              {displayText ? (
+                <motion.p
+                  key={displayText}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="text-sm leading-relaxed text-white/90"
+                >
+                  {displayText}
+                  {interimTranscript && <span className="terminal-cursor" />}
+                </motion.p>
+              ) : (
+                <motion.p
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="text-sm italic text-surface-muted/60"
+                >
+                  Transcription will appear here in real time…
+                </motion.p>
+              )}
+            </AnimatePresence>
+          </div>
+        </div>
+      </div>
+
+      {error && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-4 flex items-start gap-2 rounded-xl border border-trust-error/30 bg-trust-error/10 p-3"
+        >
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-trust-error" />
+          <p className="text-xs text-trust-error">{error}</p>
+        </motion.div>
+      )}
+
+      <footer className="mt-auto space-y-3 border-t border-surface-border pt-4">
+        <p className="text-xs text-surface-muted">Demo shortcuts (no mic needed)</p>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onDemoVerified}
+            className="flex-1 rounded-xl border border-trust-verified/30 bg-trust-verified/10 px-3 py-2 text-xs font-medium text-trust-verified transition hover:bg-trust-verified/20"
+          >
+            ✓ Verified scenario
+          </button>
+          <button
+            type="button"
+            onClick={onDemoAmber}
+            className="flex-1 rounded-xl border border-trust-amber/30 bg-trust-amber/10 px-3 py-2 text-xs font-medium text-trust-amber transition hover:bg-trust-amber/20"
+          >
+            ⚠ Amber scenario
+          </button>
+        </div>
+        <button
+          type="button"
+          onClick={onReset}
+          className="flex w-full items-center justify-center gap-2 rounded-xl border border-surface-border px-3 py-2 text-xs text-surface-muted transition hover:border-white/20 hover:text-white"
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+          Reset sandbox
+        </button>
+      </footer>
+    </div>
+  );
+}
