@@ -133,6 +133,8 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
     };
 
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+      if (event.error === 'aborted') return;
+
       const errMsg =
         event.error === 'not-allowed'
           ? 'Microphone permission denied. Please allow mic access and retry.'

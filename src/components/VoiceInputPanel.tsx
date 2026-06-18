@@ -1,4 +1,3 @@
-import { motion, AnimatePresence } from 'framer-motion';
 import { Mic, MicOff, RotateCcw, Sparkles, AlertCircle } from 'lucide-react';
 import type { TranscriptionStatus } from '../hooks/useSpeechToText';
 
@@ -67,48 +66,22 @@ export function VoiceInputPanel({
 
       <div className="flex flex-1 flex-col items-center justify-center">
         <div className="relative mb-8">
-          {/* Pulsating rings */}
-          <AnimatePresence>
-            {isListening && (
-              <>
-                {[0, 1, 2].map((i) => (
-                  <motion.div
-                    key={i}
-                    className="absolute inset-0 rounded-full border-2 border-indigo-500/40"
-                    initial={{ scale: 1, opacity: 0.6 }}
-                    animate={{ scale: 2.2 + i * 0.4, opacity: 0 }}
-                    transition={{
-                      duration: 2,
-                      repeat: Infinity,
-                      delay: i * 0.5,
-                      ease: 'easeOut',
-                    }}
-                  />
-                ))}
-              </>
-            )}
-          </AnimatePresence>
+          {isListening && (
+            <>
+              <span className="absolute inset-0 animate-ping rounded-full border-2 border-indigo-500/30" />
+              <span className="absolute inset-0 animate-pulse rounded-full border-2 border-indigo-500/20" />
+            </>
+          )}
 
-          <motion.button
+          <button
             type="button"
             disabled={!isSupported}
             onClick={isListening ? onStop : onStart}
-            className={`relative z-10 flex h-36 w-36 items-center justify-center rounded-full transition-shadow duration-300 ${
+            className={`relative z-10 flex h-36 w-36 items-center justify-center rounded-full transition-all duration-300 ${
               isListening
-                ? 'bg-gradient-to-br from-indigo-500 to-violet-600 shadow-glow-voice'
+                ? 'scale-105 bg-gradient-to-br from-indigo-500 to-violet-600 shadow-glow-voice'
                 : 'bg-gradient-to-br from-surface-raised to-surface-border hover:from-indigo-600 hover:to-violet-700 hover:shadow-glow-voice'
             } ${!isSupported ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
-            whileTap={{ scale: 0.95 }}
-            animate={
-              isListening
-                ? { scale: [1, 1.04, 1], boxShadow: ['0 0 0 0 rgba(99,102,241,0.4)', '0 0 0 20px rgba(99,102,241,0)', '0 0 0 0 rgba(99,102,241,0)'] }
-                : { scale: 1 }
-            }
-            transition={
-              isListening
-                ? { duration: 1.5, repeat: Infinity, ease: 'easeInOut' }
-                : { duration: 0.2 }
-            }
             aria-label={isListening ? 'Stop voice capture' : 'Start voice capture'}
           >
             {isListening ? (
@@ -116,72 +89,46 @@ export function VoiceInputPanel({
             ) : (
               <Mic className="h-12 w-12 text-white" />
             )}
-          </motion.button>
+          </button>
         </div>
 
-        <motion.div
-          className="mb-4 flex items-center gap-2"
-          key={status}
-          initial={{ opacity: 0, y: 6 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3 }}
-        >
+        <div className="mb-4 flex items-center gap-2">
           {isActive && (
-            <motion.span
-              className="h-2 w-2 rounded-full bg-indigo-400"
-              animate={{ opacity: [1, 0.3, 1] }}
-              transition={{ duration: 1, repeat: Infinity }}
-            />
+            <span className="h-2 w-2 animate-pulse rounded-full bg-indigo-400" />
           )}
           <span className={`text-sm font-medium ${STATUS_COLORS[status]}`}>
             {STATUS_LABELS[status]}
           </span>
-        </motion.div>
+        </div>
 
         <p className="mb-6 text-center text-xs text-surface-muted">
           {isListening ? 'Tap again to stop · Speak clearly' : 'Tap to begin voice capture'}
         </p>
 
-        {/* Live transcript preview */}
         <div className="w-full rounded-2xl border border-surface-border bg-surface-raised/60 p-4 backdrop-blur-sm">
           <p className="mb-2 text-xs font-medium uppercase tracking-wider text-surface-muted">
             Live Transcript
           </p>
           <div className="min-h-[72px]">
-            <AnimatePresence mode="wait">
-              {displayText ? (
-                <motion.p
-                  key={displayText}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="text-sm leading-relaxed text-white/90"
-                >
-                  {displayText}
-                  {interimTranscript && <span className="terminal-cursor" />}
-                </motion.p>
-              ) : (
-                <motion.p
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="text-sm italic text-surface-muted/60"
-                >
-                  Transcription will appear here in real time…
-                </motion.p>
-              )}
-            </AnimatePresence>
+            {displayText ? (
+              <p className="text-sm leading-relaxed text-white/90">
+                {displayText}
+                {interimTranscript && <span className="terminal-cursor" />}
+              </p>
+            ) : (
+              <p className="text-sm italic text-surface-muted/60">
+                Transcription will appear here in real time…
+              </p>
+            )}
           </div>
         </div>
       </div>
 
       {error && (
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mb-4 flex items-start gap-2 rounded-xl border border-trust-error/30 bg-trust-error/10 p-3"
-        >
+        <div className="mb-4 flex items-start gap-2 rounded-xl border border-trust-error/30 bg-trust-error/10 p-3">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-trust-error" />
           <p className="text-xs text-trust-error">{error}</p>
-        </motion.div>
+        </div>
       )}
 
       <footer className="mt-auto space-y-3 border-t border-surface-border pt-4">

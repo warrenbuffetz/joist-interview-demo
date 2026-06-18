@@ -1,5 +1,4 @@
-import { useEffect, useRef } from 'react';
-import { motion } from 'framer-motion';
+import { useEffect, useRef, useMemo } from 'react';
 import { Terminal, Shield } from 'lucide-react';
 import type { HandshakeLogEntry } from '../engine/handshakeEngine';
 
@@ -17,12 +16,24 @@ const LEVEL_PREFIX: Record<HandshakeLogEntry['level'], string> = {
   error: ' ERR',
 };
 
-function formatTime(date: Date): string {
+function formatTime(timestamp: number): string {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return '--:--:--.---';
   const h = date.getHours().toString().padStart(2, '0');
   const m = date.getMinutes().toString().padStart(2, '0');
   const s = date.getSeconds().toString().padStart(2, '0');
   const ms = date.getMilliseconds().toString().padStart(3, '0');
   return `${h}:${m}:${s}.${ms}`;
+}
+
+function sanitizeLogs(logs: HandshakeLogEntry[]): HandshakeLogEntry[] {
+  return logs.filter(
+    (log): log is HandshakeLogEntry =>
+      log != null &&
+      typeof log.id === 'string' &&
+      typeof log.timestamp === 'number' &&
+      typeof log.message === 'string',
+  );
 }
 
 interface TrustLogsPanelProps {
@@ -32,12 +43,13 @@ interface TrustLogsPanelProps {
 
 export function TrustLogsPanel({ logs, isProcessing }: TrustLogsPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const safeLogs = useMemo(() => sanitizeLogs(logs), [logs]);
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [logs]);
+  }, [safeLogs]);
 
   return (
     <div className="flex h-full flex-col">
@@ -55,7 +67,6 @@ export function TrustLogsPanel({ logs, isProcessing }: TrustLogsPanelProps) {
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-surface-border bg-[#0d0e10]">
-        {/* Terminal chrome */}
         <div className="flex items-center gap-2 border-b border-surface-border px-4 py-2.5">
           <div className="flex gap-1.5">
             <span className="h-3 w-3 rounded-full bg-red-500/80" />
@@ -69,41 +80,30 @@ export function TrustLogsPanel({ logs, isProcessing }: TrustLogsPanelProps) {
             </span>
           </div>
           {isProcessing && (
-            <motion.span
-              className="font-mono text-xs text-indigo-400"
-              animate={{ opacity: [1, 0.4, 1] }}
-              transition={{ duration: 1.2, repeat: Infinity }}
-            >
-              RUNNING
-            </motion.span>
+            <span className="animate-pulse font-mono text-xs text-indigo-400">RUNNING</span>
           )}
         </div>
 
-        {/* Log stream */}
         <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 font-mono text-xs leading-5">
-          {logs.length === 0 ? (
+          {safeLogs.length === 0 ? (
             <p className="text-surface-muted/50">
               <span className="text-trust-verified">$</span> awaiting voice intake…
               <span className="terminal-cursor" />
             </p>
           ) : (
-            logs.map((log) => (
+            safeLogs.map((log) => (
               <div key={log.id} className="mb-1">
                 <span className="text-surface-muted/60">[{formatTime(log.timestamp)}]</span>{' '}
-                <span className={LEVEL_STYLES[log.level]}>[{LEVEL_PREFIX[log.level]}]</span>{' '}
+                <span className={LEVEL_STYLES[log.level] ?? 'text-surface-muted'}>
+                  [{LEVEL_PREFIX[log.level] ?? '????'}]
+                </span>{' '}
                 <span className="text-white/80">{log.message}</span>
               </div>
             ))
           )}
 
           {isProcessing && (
-            <motion.p
-              className="mt-2 text-indigo-400"
-              animate={{ opacity: [1, 0.3, 1] }}
-              transition={{ duration: 0.8, repeat: Infinity }}
-            >
-              ▌ processing handshake…
-            </motion.p>
+            <p className="mt-2 animate-pulse text-indigo-400">▌ processing handshake…</p>
           )}
         </div>
       </div>

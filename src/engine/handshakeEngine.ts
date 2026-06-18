@@ -21,7 +21,7 @@ export interface TrustGap {
 
 export interface HandshakeLogEntry {
   id: string;
-  timestamp: Date;
+  timestamp: number;
   level: 'info' | 'success' | 'warn' | 'error';
   phase: 'intake' | 'normalize' | 'catalog' | 'pricing' | 'trust' | 'complete';
   message: string;
@@ -48,7 +48,7 @@ function createLog(
 ): HandshakeLogEntry {
   return {
     id: `log-${Date.now()}-${++logCounter}`,
-    timestamp: new Date(),
+    timestamp: Date.now(),
     level,
     phase,
     message,

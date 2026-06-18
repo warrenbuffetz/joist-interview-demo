@@ -1,54 +1,80 @@
 import { useCallback, useState, useRef, useEffect } from 'react';
-import { motion } from 'framer-motion';
 import { VoiceInputPanel } from './components/VoiceInputPanel';
 import { TrustLogsPanel } from './components/TrustLogsPanel';
 import { SmartphonePreview } from './components/SmartphonePreview';
 import { useSpeechToText } from './hooks/useSpeechToText';
-import { runHandshakeEngine, type HandshakeResult } from './engine/handshakeEngine';
+import {
+  runHandshakeEngine,
+  type HandshakeResult,
+  type HandshakeLogEntry,
+} from './engine/handshakeEngine';
 import { DEMO_TRANSCRIPTS } from './data/catalogData';
 
 type WorkflowStage = 'idle' | 'listening' | 'drafting' | 'complete';
 
+function isValidLog(log: HandshakeLogEntry | undefined | null): log is HandshakeLogEntry {
+  return (
+    log != null &&
+    typeof log.id === 'string' &&
+    typeof log.timestamp === 'number' &&
+    typeof log.message === 'string'
+  );
+}
+
 function App() {
   const [handshakeResult, setHandshakeResult] = useState<HandshakeResult | null>(null);
-  const [displayLogs, setDisplayLogs] = useState<HandshakeResult['logs']>([]);
+  const [displayLogs, setDisplayLogs] = useState<HandshakeLogEntry[]>([]);
   const [workflowStage, setWorkflowStage] = useState<WorkflowStage>('idle');
   const [isProcessing, setIsProcessing] = useState(false);
-  const logIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const onHandshakeCompleteRef = useRef<() => void>(() => {});
+  const [activeTranscript, setActiveTranscript] = useState('');
+  const runIdRef = useRef(0);
+  const completeMappingRef = useRef<() => void>(() => {});
 
-  const clearLogInterval = useCallback(() => {
-    if (logIntervalRef.current) {
-      clearInterval(logIntervalRef.current);
-      logIntervalRef.current = null;
-    }
+  const cancelRun = useCallback(() => {
+    runIdRef.current += 1;
+  }, []);
+
+  useEffect(() => () => cancelRun(), [cancelRun]);
+
+  const finishHandshake = useCallback((result: HandshakeResult, runId: number) => {
+    if (runId !== runIdRef.current) return;
+    setHandshakeResult(result);
+    setIsProcessing(false);
+    setWorkflowStage('complete');
+    completeMappingRef.current();
   }, []);
 
   const processTranscript = useCallback(
     (transcript: string) => {
-      clearLogInterval();
+      cancelRun();
+      const runId = runIdRef.current;
+
+      setActiveTranscript(transcript);
       setWorkflowStage('drafting');
       setIsProcessing(true);
       setHandshakeResult(null);
       setDisplayLogs([]);
 
       const result = runHandshakeEngine(transcript);
-      let index = 0;
+      const validLogs = result.logs.filter(isValidLog);
 
-      logIntervalRef.current = setInterval(() => {
-        if (index < result.logs.length) {
-          setDisplayLogs((prev) => [...prev, result.logs[index]]);
-          index++;
-        } else {
-          clearLogInterval();
-          setHandshakeResult(result);
-          setIsProcessing(false);
-          setWorkflowStage('complete');
-          onHandshakeCompleteRef.current();
-        }
-      }, 180);
+      // Stream logs one at a time using slice — no index-based access
+      validLogs.forEach((log, i) => {
+        setTimeout(() => {
+          if (runId !== runIdRef.current) return;
+          setDisplayLogs((prev) => [...prev, log]);
+          if (i === validLogs.length - 1) {
+            finishHandshake(result, runId);
+          }
+        }, i * 150);
+      });
+
+      // Safety: if engine returns zero logs, still finish
+      if (validLogs.length === 0) {
+        finishHandshake(result, runId);
+      }
     },
-    [clearLogInterval],
+    [cancelRun, finishHandshake],
   );
 
   const speech = useSpeechToText({
@@ -56,37 +82,41 @@ function App() {
   });
 
   useEffect(() => {
-    onHandshakeCompleteRef.current = speech.completeMapping;
+    completeMappingRef.current = speech.completeMapping;
   }, [speech.completeMapping]);
 
   const handleReset = useCallback(() => {
-    clearLogInterval();
+    cancelRun();
     speech.reset();
     setHandshakeResult(null);
     setDisplayLogs([]);
+    setActiveTranscript('');
     setWorkflowStage('idle');
     setIsProcessing(false);
-  }, [clearLogInterval, speech]);
+  }, [cancelRun, speech]);
 
   const handleStart = useCallback(() => {
-    clearLogInterval();
+    cancelRun();
     setHandshakeResult(null);
     setDisplayLogs([]);
+    setActiveTranscript('');
     setWorkflowStage('listening');
     speech.startListening();
-  }, [clearLogInterval, speech]);
+  }, [cancelRun, speech]);
 
   const handleStop = useCallback(() => {
     speech.stopListening();
   }, [speech]);
 
   const handleDemoVerified = useCallback(() => {
-    speech.injectTranscript(DEMO_TRANSCRIPTS.verified);
-  }, [speech]);
+    processTranscript(DEMO_TRANSCRIPTS.verified);
+  }, [processTranscript]);
 
   const handleDemoAmber = useCallback(() => {
-    speech.injectTranscript(DEMO_TRANSCRIPTS.amber);
-  }, [speech]);
+    processTranscript(DEMO_TRANSCRIPTS.amber);
+  }, [processTranscript]);
+
+  const displayTranscript = activeTranscript || speech.finalTranscript;
 
   return (
     <div className="min-h-screen bg-surface">
@@ -107,29 +137,21 @@ function App() {
             <span className="hidden rounded-full border border-surface-border px-3 py-1 text-xs text-surface-muted sm:inline">
               Project Handshake v1.0
             </span>
-            <motion.div
-              className="flex items-center gap-1.5 rounded-full border border-trust-verified/30 bg-trust-verified/10 px-3 py-1"
-              animate={{ opacity: [0.7, 1, 0.7] }}
-              transition={{ duration: 2, repeat: Infinity }}
-            >
+            <span className="flex items-center gap-1.5 rounded-full border border-trust-verified/30 bg-trust-verified/10 px-3 py-1">
               <span className="h-1.5 w-1.5 rounded-full bg-trust-verified" />
               <span className="text-xs font-medium text-trust-verified">LIVE</span>
-            </motion.div>
+            </span>
           </div>
         </div>
       </header>
 
       <main className="mx-auto max-w-[1600px] px-6 py-6">
         <div className="grid min-h-[calc(100vh-88px)] grid-cols-1 gap-4 lg:grid-cols-3">
-          <motion.section
-            className="flex min-h-[480px] flex-col overflow-hidden rounded-2xl border border-surface-border bg-surface-raised/50 p-6 backdrop-blur-sm lg:min-h-0"
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-          >
+          <section className="flex min-h-[480px] flex-col overflow-y-auto rounded-2xl border border-surface-border bg-surface-raised/50 p-6 lg:min-h-0">
             <VoiceInputPanel
-              status={speech.status}
+              status={isProcessing ? 'mapping' : speech.status}
               interimTranscript={speech.interimTranscript}
-              finalTranscript={speech.finalTranscript}
+              finalTranscript={displayTranscript}
               isListening={speech.isListening}
               isSupported={speech.isSupported}
               error={speech.error}
@@ -139,25 +161,15 @@ function App() {
               onDemoVerified={handleDemoVerified}
               onDemoAmber={handleDemoAmber}
             />
-          </motion.section>
+          </section>
 
-          <motion.section
-            className="flex min-h-[480px] flex-col overflow-hidden rounded-2xl border border-surface-border bg-surface-raised/50 p-6 backdrop-blur-sm lg:min-h-0"
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-          >
+          <section className="flex min-h-[480px] flex-col overflow-hidden rounded-2xl border border-surface-border bg-surface-raised/50 p-6 lg:min-h-0">
             <TrustLogsPanel logs={displayLogs} isProcessing={isProcessing} />
-          </motion.section>
+          </section>
 
-          <motion.section
-            className="flex min-h-[480px] flex-col overflow-hidden rounded-2xl border border-surface-border bg-surface-raised/50 p-6 backdrop-blur-sm lg:min-h-0"
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-          >
+          <section className="flex min-h-[480px] flex-col overflow-y-auto rounded-2xl border border-surface-border bg-surface-raised/50 p-6 lg:min-h-0">
             <SmartphonePreview result={handshakeResult} workflowStage={workflowStage} />
-          </motion.section>
+          </section>
         </div>
       </main>
     </div>
