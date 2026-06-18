@@ -1,4 +1,8 @@
+import type { ScenarioBillingOverride } from '../utils/scenarioBilling';
+
 export type ScriptOutcome = 'verified' | 'hitl';
+
+export type { ScenarioBillingOverride };
 
 export interface PresenterScript {
   id: string;
@@ -15,6 +19,8 @@ export interface PresenterScript {
   simulateStt: string;
   /** Contractor-approved transcript after human review */
   hitlCorrected: string;
+  /** Optional deterministic billing state for sandbox demos */
+  billingOverride?: ScenarioBillingOverride;
 }
 
 export const PRESENTER_SCRIPTS: PresenterScript[] = [
@@ -35,8 +41,28 @@ export const PRESENTER_SCRIPTS: PresenterScript[] = [
       'Install two GFCI outlets in the kitchen, replace the HVAC filter sixteen by twenty five, and bill one hour of standard labor.',
   },
   {
+    id: 'crew-plural-nlp',
+    title: 'Script 2 — Casual Crew & Duration',
+    tag: 'Verified · NLP',
+    outcome: 'verified',
+    readAloud:
+      'Me and a helper spent forty five minutes replacing the copper pipe under the commercial sink.',
+    deliveryNotes:
+      "Speak conversationally at a normal pace. Emphasize the phrase 'me and a helper' naturally without pausing, allowing the panel to see how the system handles casual plurals.",
+    presenterCue:
+      "This path showcases the natural language processing (NLP) model's entity extraction rules for multi-resource attribution, parsing 'me and a helper' as an implicit Crew Size of 2.\n\nProduct Note: To maintain low MVP scope, the system applies a uniform blended rate multiplier here. While commercial field operations often demand tiered apprentice rates or mandatory service minimums, this pattern validates frictionless speed-of-entry for the 80% baseline use case before expanding the schema for complex, contract-specific labor rules.",
+    simulateStt:
+      'Me and a helper spent forty five minutes replacing the copper pipe under the commercial sink.',
+    hitlCorrected:
+      'Me and a helper spent forty five minutes replacing the copper pipe under the commercial sink.',
+    billingOverride: {
+      materials: [{ sku: 'SKU-PLUMB-CP34', quantity: 10 }],
+      labor: { minutes: 45, crewSize: 2 },
+    },
+  },
+  {
     id: 'accent-slang',
-    title: 'Script 2 — Accent & Trade Slang',
+    title: 'Script 3 — Accent & Trade Slang',
     tag: 'HITL · accent',
     outcome: 'hitl',
     readAloud:
@@ -52,7 +78,7 @@ export const PRESENTER_SCRIPTS: PresenterScript[] = [
   },
   {
     id: 'noisy-van',
-    title: 'Script 3 — Noisy Van / Low Audio',
+    title: 'Script 4 — Noisy Van / Low Audio',
     tag: 'HITL · environment',
     outcome: 'hitl',
     readAloud:
@@ -67,7 +93,7 @@ export const PRESENTER_SCRIPTS: PresenterScript[] = [
   },
   {
     id: 'vague-pricing',
-    title: 'Script 4 — Vague On-Site Pricing',
+    title: 'Script 5 — Vague On-Site Pricing',
     tag: 'HITL · pricing gap',
     outcome: 'hitl',
     readAloud:
@@ -83,7 +109,7 @@ export const PRESENTER_SCRIPTS: PresenterScript[] = [
   },
   {
     id: 'fast-walkthrough',
-    title: 'Script 5 — Fast Walkthrough',
+    title: 'Script 6 — Fast Walkthrough',
     tag: 'HITL · pace',
     outcome: 'hitl',
     readAloud:

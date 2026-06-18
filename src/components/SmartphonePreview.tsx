@@ -9,7 +9,7 @@ import type { HandshakeResult, InvoiceLineItem, TrustStatus } from '../engine/ha
 import { PhoneChrome } from './phone/PhoneChrome';
 import { InvoiceMediationScreen } from './phone/InvoiceMediationScreen';
 import { InvoiceSuccessScreen } from './phone/InvoiceSuccessScreen';
-import { computeInvoiceTotals } from '../utils/invoiceTotals';
+import { computeInvoiceTotals, formatLineItemCalculation, TAX_LABEL } from '../utils/invoiceTotals';
 
 type PhoneView = 'invoice' | 'mediation' | 'success';
 
@@ -238,7 +238,7 @@ export function SmartphonePreview({ result, workflowStage, onReset }: Smartphone
                         </p>
                       </div>
                       <p className="mt-1 text-[9px] text-gray-400">
-                        {item.quantity} {item.unit} × ${item.unitPrice.toFixed(2)}
+                        {formatLineItemCalculation(item)}
                       </p>
                     </div>
                   ))
@@ -255,7 +255,7 @@ export function SmartphonePreview({ result, workflowStage, onReset }: Smartphone
                   <span>${displayResult.subtotal.toFixed(2)}</span>
                 </div>
                 <div className="mt-1 flex justify-between text-[10px] text-gray-500">
-                  <span>Tax (8.25%)</span>
+                  <span>{TAX_LABEL}</span>
                   <span>${displayResult.tax.toFixed(2)}</span>
                 </div>
                 <div className="mt-2 flex justify-between border-t border-gray-100 pt-2">

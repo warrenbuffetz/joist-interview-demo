@@ -1,4 +1,8 @@
 import { CatalogData, type CatalogItem } from '../data/catalogData';
+import { MATERIAL_DEFAULT_QUANTITIES } from '../data/materialDefaults';
+import type { LineItemType } from '../types/invoice';
+import { computeLaborLineTotal, LABOR_SKU } from '../utils/laborTime';
+import { computeTax, computeTotalWithTax } from '../utils/tax';
 
 export type TrustStatus = 'idle' | 'processing' | 'verified' | 'amber_alert';
 
@@ -11,6 +15,11 @@ export interface InvoiceLineItem {
   lineTotal: number;
   confidence: number;
   matchedFrom: string;
+  itemType?: LineItemType;
+  /** Labor only — duration in whole minutes. */
+  durationMinutes?: number;
+  /** Labor only — crew multiplier (min 1). */
+  crewSize?: number;
 }
 
 export interface TrustGap {
@@ -63,6 +72,126 @@ function normalizeText(text: string): string {
     .trim();
 }
 
+function isDurationContext(text: string, matchIndex: number): boolean {
+  const window = text.slice(matchIndex, matchIndex + 20).toLowerCase();
+  return /\s*(minutes?|mins?|hours?|hrs?)\b/.test(window);
+}
+
+function extractDurationMinutes(transcript: string): number | null {
+  const normalized = normalizeText(transcript);
+
+  const compoundMinutes: Record<string, number> = {
+    'forty five': 45,
+    'fifty five': 55,
+    'thirty five': 35,
+    'twenty five': 25,
+    'sixty five': 65,
+    'seventy five': 75,
+    'ninety five': 95,
+  };
+
+  for (const [phrase, minutes] of Object.entries(compoundMinutes)) {
+    if (normalized.includes(`${phrase} minutes`) || normalized.includes(`${phrase} minute`)) {
+      return minutes;
+    }
+  }
+
+  const digitMatch = normalized.match(/\b(\d+)\s*(minutes?|mins?)\b/);
+  if (digitMatch) return parseInt(digitMatch[1], 10);
+
+  const hourMatch = normalized.match(
+    /\b(one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s*(hours?|hrs?)\b/,
+  );
+  if (hourMatch) {
+    const wordToNum: Record<string, number> = {
+      one: 1,
+      two: 2,
+      three: 3,
+      four: 4,
+      five: 5,
+      six: 6,
+      seven: 7,
+      eight: 8,
+      nine: 9,
+      ten: 10,
+    };
+    const raw = hourMatch[1];
+    const hours = wordToNum[raw] ?? parseInt(raw, 10);
+    if (!Number.isNaN(hours) && hours > 0) return hours * 60;
+  }
+
+  return null;
+}
+
+function extractCrewSize(transcript: string): number | null {
+  const normalized = normalizeText(transcript);
+
+  if (/\bme and a helper\b/.test(normalized) || /\bme and an helper\b/.test(normalized)) {
+    return 2;
+  }
+  if (/\bboth of us\b/.test(normalized) || /\bthe two of us\b/.test(normalized)) {
+    return 2;
+  }
+  if (/\bme and two helpers\b/.test(normalized)) {
+    return 3;
+  }
+
+  return null;
+}
+
+function hasExplicitMaterialQuantity(transcript: string, unit: string): boolean {
+  const unitPattern =
+    unit === 'ft' ? /\b\d+\s*(ft|feet|foot)\b/i : new RegExp(`\\b\\d+\\s*${unit}s?\\b`, 'i');
+  return unitPattern.test(transcript);
+}
+
+function applyMaterialDefaults(transcript: string, lineItems: InvoiceLineItem[]): InvoiceLineItem[] {
+  return lineItems.map((line) => {
+    const defaultQty = MATERIAL_DEFAULT_QUANTITIES[line.sku];
+    if (!defaultQty) return line;
+
+    const catalogItem = CatalogData.find((item) => item.sku === line.sku);
+    if (!catalogItem) return line;
+
+    if (hasExplicitMaterialQuantity(transcript, catalogItem.unit)) {
+      return line;
+    }
+
+    const quantity = defaultQty;
+    const lineTotal = Math.round(quantity * line.unitPrice * 100) / 100;
+    return { ...line, quantity, lineTotal };
+  });
+}
+
+function upsertLaborLine(
+  lineItems: InvoiceLineItem[],
+  minutes: number,
+  crewSize: number,
+  matchedFrom: string,
+): InvoiceLineItem[] {
+  const laborCatalog = CatalogData.find((item) => item.sku === LABOR_SKU);
+  if (!laborCatalog) return lineItems;
+
+  const durationHours = minutes / 60;
+  const lineTotal = computeLaborLineTotal(laborCatalog.unitPrice, minutes, crewSize);
+  const laborLine: InvoiceLineItem = {
+    sku: laborCatalog.sku,
+    name: laborCatalog.name,
+    quantity: durationHours,
+    unitPrice: laborCatalog.unitPrice,
+    unit: laborCatalog.unit,
+    lineTotal,
+    confidence: 0.96,
+    matchedFrom,
+    itemType: 'labor',
+    durationMinutes: minutes,
+    crewSize,
+  };
+
+  const withoutLabor = lineItems.filter((line) => line.sku !== LABOR_SKU);
+  return [...withoutLabor, laborLine];
+}
+
 function extractQuantity(text: string, itemName: string): number {
   const patterns = [
     /(\d+)\s*(hours?|hrs?|hr)\b/i,
@@ -90,6 +219,10 @@ function extractQuantity(text: string, itemName: string): number {
   for (const pattern of patterns) {
     const match = searchWindow.match(pattern);
     if (match) {
+      const matchIndex = searchWindow.indexOf(match[0]);
+      if (matchIndex >= 0 && isDurationContext(searchWindow, matchIndex)) {
+        continue;
+      }
       const raw = match[1].toLowerCase();
       const num = wordToNum[raw] ?? parseInt(raw, 10);
       if (!isNaN(num) && num > 0) return num;
@@ -209,7 +342,7 @@ export function runHandshakeEngine(transcript: string): HandshakeResult {
   logs.push(createLog('info', 'catalog', `[CATALOG] Querying Joist Parts Catalog (${CatalogData.length} SKUs)…`));
 
   const catalogMatches = findAllMatches(transcript);
-  const lineItems: InvoiceLineItem[] = catalogMatches.map(({ item, alias, confidence }) => {
+  let lineItems: InvoiceLineItem[] = catalogMatches.map(({ item, alias, confidence }) => {
     const quantity = extractQuantity(transcript, alias);
     const lineTotal = Math.round(quantity * item.unitPrice * 100) / 100;
     logs.push(
@@ -246,9 +379,47 @@ export function runHandshakeEngine(transcript: string): HandshakeResult {
         confidence,
         matchedFrom: alias,
       });
-    } else {
+    } else if (lineItems.length === 0) {
       logs.push(createLog('warn', 'catalog', `[CATALOG] No confident SKU match found`));
     }
+  }
+
+  lineItems = applyMaterialDefaults(transcript, lineItems);
+
+  const durationMinutes = extractDurationMinutes(transcript);
+  const inferredCrewSize = extractCrewSize(transcript);
+
+  if (durationMinutes != null) {
+    const crewSize = inferredCrewSize ?? 1;
+    if (inferredCrewSize != null) {
+      logs.push(
+        createLog(
+          'success',
+          'normalize',
+          `[NLP] Crew attribution: "me and a helper" → crewSize: ${crewSize}`,
+        ),
+      );
+    }
+    logs.push(
+      createLog(
+        'success',
+        'normalize',
+        `[NLP] Duration extract: ${durationMinutes} minutes → ${(durationMinutes / 60).toFixed(2)} hr`,
+      ),
+    );
+    lineItems = upsertLaborLine(
+      lineItems,
+      durationMinutes,
+      crewSize,
+      inferredCrewSize != null ? 'crew plural attribution' : 'duration attribution',
+    );
+    logs.push(
+      createLog(
+        'success',
+        'catalog',
+        `[MATCH] ${LABOR_SKU} ← labor attribution (duration: ${durationMinutes}m, crew: ${crewSize}, conf: 96%)`,
+      ),
+    );
   }
 
   logs.push(createLog('info', 'pricing', `[PRICING] Validating line-item pricing against catalog…`));
@@ -260,8 +431,8 @@ export function runHandshakeEngine(transcript: string): HandshakeResult {
   }
 
   const subtotal = lineItems.reduce((sum, item) => sum + item.lineTotal, 0);
-  const tax = Math.round(subtotal * 0.0825 * 100) / 100;
-  const total = Math.round((subtotal + tax) * 100) / 100;
+  const tax = computeTax(subtotal);
+  const total = computeTotalWithTax(subtotal);
 
   logs.push(createLog('info', 'trust', `[TRUST] Computing handshake trust score…`));
 

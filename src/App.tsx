@@ -9,6 +9,11 @@ import {
   type HandshakeLogEntry,
 } from './engine/handshakeEngine';
 import { DEMO_TRANSCRIPTS } from './data/catalogData';
+import type { PresenterScript } from './data/presenterScripts';
+import {
+  applyScenarioBilling,
+  type ScenarioBillingOverride,
+} from './utils/scenarioBilling';
 
 type WorkflowStage = 'idle' | 'listening' | 'drafting' | 'complete';
 
@@ -45,7 +50,7 @@ function App() {
   }, []);
 
   const processTranscript = useCallback(
-    (transcript: string) => {
+    (transcript: string, billingOverride?: ScenarioBillingOverride) => {
       cancelRun();
       const runId = runIdRef.current;
 
@@ -55,7 +60,10 @@ function App() {
       setHandshakeResult(null);
       setDisplayLogs([]);
 
-      const result = runHandshakeEngine(transcript);
+      let result = runHandshakeEngine(transcript);
+      if (billingOverride) {
+        result = applyScenarioBilling(result, billingOverride);
+      }
       const validLogs = result.logs.filter(isValidLog);
 
       // Stream logs one at a time using slice — no index-based access
@@ -75,6 +83,13 @@ function App() {
       }
     },
     [cancelRun, finishHandshake],
+  );
+
+  const processPresenterScript = useCallback(
+    (script: PresenterScript) => {
+      processTranscript(script.readAloud, script.billingOverride);
+    },
+    [processTranscript],
   );
 
   const speech = useSpeechToText({
@@ -162,6 +177,7 @@ function App() {
               onDemoAmber={handleDemoAmber}
               onSimulateStt={processTranscript}
               onApplyCorrection={processTranscript}
+              onRunPresenterScript={processPresenterScript}
             />
           </section>
 

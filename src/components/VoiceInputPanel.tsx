@@ -1,5 +1,6 @@
 import { Mic, MicOff, RotateCcw, Sparkles, AlertCircle } from 'lucide-react';
 import type { TranscriptionStatus } from '../hooks/useSpeechToText';
+import type { PresenterScript } from '../data/presenterScripts';
 import { PresenterScripts } from './PresenterScripts';
 
 const STATUS_LABELS: Record<TranscriptionStatus, string> = {
@@ -34,6 +35,7 @@ interface VoiceInputPanelProps {
   onDemoAmber: () => void;
   onSimulateStt: (transcript: string) => void;
   onApplyCorrection: (transcript: string) => void;
+  onRunPresenterScript: (script: PresenterScript) => void;
 }
 
 export function VoiceInputPanel({
@@ -50,6 +52,7 @@ export function VoiceInputPanel({
   onDemoAmber,
   onSimulateStt,
   onApplyCorrection,
+  onRunPresenterScript,
 }: VoiceInputPanelProps) {
   const displayText = interimTranscript || finalTranscript;
   const isActive = isListening || status === 'transcribing' || status === 'mapping';
@@ -158,6 +161,7 @@ export function VoiceInputPanel({
         <PresenterScripts
           onSimulateStt={onSimulateStt}
           onApplyCorrection={onApplyCorrection}
+          onRunPresenterScript={onRunPresenterScript}
           isListening={isListening}
         />
 

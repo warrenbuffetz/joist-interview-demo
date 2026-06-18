@@ -1,14 +1,49 @@
 import { useMemo, useState } from 'react';
-import { AlertTriangle, Check, CheckCircle2, Minus, Plus, Search, ShieldCheck, Trash2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Search, ShieldCheck } from 'lucide-react';
 import { CatalogData } from '../../data/catalogData';
 import type { HandshakeResult, InvoiceLineItem } from '../../engine/handshakeEngine';
-import { computeInvoiceTotals, lineItemFromCatalog } from '../../utils/invoiceTotals';
+import {
+  buildMediationLineItems,
+  computeInvoiceTotals,
+  type LaborSelection,
+} from '../../utils/invoiceTotals';
+import { isLaborSku } from '../../utils/laborTime';
+import { MediationLineItemCard } from './mediation/MediationLineItemCard';
 
 interface InvoiceMediationScreenProps {
   result: HandshakeResult;
   mode?: 'review' | 'modify';
   onConfirm: (lineItems: InvoiceLineItem[]) => void;
   onBack: () => void;
+}
+
+const DEFAULT_LABOR_MINUTES = 60;
+
+function hoursToMinutes(hours: number): number {
+  return Math.round(hours * 60);
+}
+
+function buildInitialPhysicalQty(result: HandshakeResult): Record<string, number> {
+  const initial: Record<string, number> = {};
+  result.lineItems.forEach((item) => {
+    if (!isLaborSku(item.sku)) {
+      initial[item.sku] = item.quantity;
+    }
+  });
+  return initial;
+}
+
+function buildInitialLaborSelections(result: HandshakeResult): Record<string, LaborSelection> {
+  const initial: Record<string, LaborSelection> = {};
+  result.lineItems.forEach((item) => {
+    if (isLaborSku(item.sku)) {
+      initial[item.sku] = {
+        minutes: item.durationMinutes ?? hoursToMinutes(item.quantity),
+        crewSize: item.crewSize ?? 1,
+      };
+    }
+  });
+  return initial;
 }
 
 export function InvoiceMediationScreen({
@@ -18,13 +53,12 @@ export function InvoiceMediationScreen({
   onBack,
 }: InvoiceMediationScreenProps) {
   const [search, setSearch] = useState('');
-  const [selected, setSelected] = useState<Record<string, number>>(() => {
-    const initial: Record<string, number> = {};
-    result.lineItems.forEach((item) => {
-      initial[item.sku] = item.quantity;
-    });
-    return initial;
-  });
+  const [physicalQty, setPhysicalQty] = useState<Record<string, number>>(() =>
+    buildInitialPhysicalQty(result),
+  );
+  const [laborSelections, setLaborSelections] = useState<Record<string, LaborSelection>>(() =>
+    buildInitialLaborSelections(result),
+  );
 
   const filteredCatalog = useMemo(() => {
     const q = search.toLowerCase().trim();
@@ -37,17 +71,33 @@ export function InvoiceMediationScreen({
     );
   }, [search]);
 
-  const selectedLineItems = useMemo(() => {
-    return CatalogData.filter((item) => selected[item.sku] != null).map((item) =>
-      lineItemFromCatalog(item, selected[item.sku]),
-    );
-  }, [selected]);
+  const selectedLineItems = useMemo(
+    () => buildMediationLineItems(CatalogData, physicalQty, laborSelections),
+    [physicalQty, laborSelections],
+  );
 
   const totals = computeInvoiceTotals(selectedLineItems);
-  const selectedCount = Object.keys(selected).length;
+  const selectedCount = selectedLineItems.length;
+  const isModify = mode === 'modify';
+
+  const isItemOn = (sku: string) =>
+    isLaborSku(sku) ? laborSelections[sku] != null : physicalQty[sku] != null;
 
   const toggleItem = (sku: string) => {
-    setSelected((prev) => {
+    if (isLaborSku(sku)) {
+      setLaborSelections((prev) => {
+        const next = { ...prev };
+        if (next[sku] != null) {
+          delete next[sku];
+        } else {
+          next[sku] = { minutes: DEFAULT_LABOR_MINUTES, crewSize: 1 };
+        }
+        return next;
+      });
+      return;
+    }
+
+    setPhysicalQty((prev) => {
       const next = { ...prev };
       if (next[sku] != null) {
         delete next[sku];
@@ -59,7 +109,7 @@ export function InvoiceMediationScreen({
   };
 
   const adjustQty = (sku: string, delta: number) => {
-    setSelected((prev) => {
+    setPhysicalQty((prev) => {
       const current = prev[sku] ?? 1;
       const nextQty = Math.max(1, Math.min(99, current + delta));
       return { ...prev, [sku]: nextQty };
@@ -67,7 +117,16 @@ export function InvoiceMediationScreen({
   };
 
   const removeItem = (sku: string) => {
-    setSelected((prev) => {
+    if (isLaborSku(sku)) {
+      setLaborSelections((prev) => {
+        const next = { ...prev };
+        delete next[sku];
+        return next;
+      });
+      return;
+    }
+
+    setPhysicalQty((prev) => {
       const next = { ...prev };
       delete next[sku];
       return next;
@@ -75,7 +134,7 @@ export function InvoiceMediationScreen({
   };
 
   const decreaseOrRemove = (sku: string) => {
-    const current = selected[sku] ?? 1;
+    const current = physicalQty[sku] ?? 1;
     if (current <= 1) {
       removeItem(sku);
     } else {
@@ -83,7 +142,19 @@ export function InvoiceMediationScreen({
     }
   };
 
-  const isModify = mode === 'modify';
+  const updateLaborMinutes = (sku: string, minutes: number) => {
+    setLaborSelections((prev) => ({
+      ...prev,
+      [sku]: { ...prev[sku], minutes },
+    }));
+  };
+
+  const updateCrewSize = (sku: string, crewSize: number) => {
+    setLaborSelections((prev) => ({
+      ...prev,
+      [sku]: { ...prev[sku], crewSize: Math.max(1, crewSize) },
+    }));
+  };
 
   return (
     <div className="flex h-full flex-col bg-gray-50">
@@ -154,93 +225,26 @@ export function InvoiceMediationScreen({
 
         <div className="space-y-2">
           {filteredCatalog.map((item) => {
-            const isOn = selected[item.sku] != null;
+            const isOn = isItemOn(item.sku);
             const wasVoiceMatch = result.lineItems.some((l) => l.sku === item.sku);
-            const qty = selected[item.sku] ?? 1;
+            const labor = laborSelections[item.sku];
 
             return (
-              <div
+              <MediationLineItemCard
                 key={item.sku}
-                className={`rounded-xl border p-2.5 transition ${
-                  isOn
-                    ? 'border-indigo-200 bg-indigo-50/50 shadow-sm'
-                    : 'border-gray-100 bg-white'
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => toggleItem(item.sku)}
-                    className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition ${
-                      isOn
-                        ? 'border-indigo-600 bg-indigo-600 text-white'
-                        : 'border-gray-300 bg-white'
-                    }`}
-                    aria-label={isOn ? `Deselect ${item.name}` : `Select ${item.name}`}
-                  >
-                    {isOn && <Check className="h-2.5 w-2.5" />}
-                  </button>
-
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-[10px] font-semibold text-gray-900">{item.name}</p>
-                    <p className="text-[9px] text-gray-400">
-                      {item.sku} · ${item.unitPrice.toFixed(2)}/{item.unit}
-                    </p>
-                    {wasVoiceMatch && isOn && (
-                      <span className="mt-0.5 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[8px] font-medium text-amber-800">
-                        Voice match — confirm qty
-                      </span>
-                    )}
-                  </div>
-
-                  {isOn && (
-                    <button
-                      type="button"
-                      onClick={() => removeItem(item.sku)}
-                      className="flex shrink-0 items-center gap-0.5 text-[9px] font-medium text-red-500 hover:text-red-600"
-                      aria-label={`Delete ${item.name}`}
-                    >
-                      <Trash2 className="h-3 w-3" />
-                      Delete
-                    </button>
-                  )}
-                </div>
-
-                {isOn && (
-                  <div className="mt-2 flex items-center justify-between pl-6">
-                    <span className="text-[9px] text-gray-500">Quantity</span>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => decreaseOrRemove(item.sku)}
-                        className={`flex h-6 w-6 items-center justify-center rounded-lg border bg-white ${
-                          qty === 1
-                            ? 'border-red-200 text-red-500 hover:bg-red-50'
-                            : 'border-gray-200 text-gray-600 hover:bg-gray-50'
-                        }`}
-                        aria-label={qty === 1 ? `Remove ${item.name}` : 'Decrease quantity'}
-                      >
-                        {qty === 1 ? (
-                          <Trash2 className="h-3 w-3" />
-                        ) : (
-                          <Minus className="h-3 w-3" />
-                        )}
-                      </button>
-                      <span className="w-6 text-center text-[10px] font-semibold text-gray-900">
-                        {qty}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => adjustQty(item.sku, 1)}
-                        className="flex h-6 w-6 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
-                        aria-label="Increase quantity"
-                      >
-                        <Plus className="h-3 w-3" />
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
+                item={item}
+                isOn={isOn}
+                quantity={physicalQty[item.sku] ?? 1}
+                laborMinutes={labor?.minutes ?? DEFAULT_LABOR_MINUTES}
+                crewSize={labor?.crewSize ?? 1}
+                wasVoiceMatch={wasVoiceMatch}
+                onToggle={() => toggleItem(item.sku)}
+                onRemove={() => removeItem(item.sku)}
+                onAdjustQty={(delta) => adjustQty(item.sku, delta)}
+                onDecreaseOrRemove={() => decreaseOrRemove(item.sku)}
+                onLaborMinutesChange={(minutes) => updateLaborMinutes(item.sku, minutes)}
+                onCrewSizeChange={(crewSize) => updateCrewSize(item.sku, crewSize)}
+              />
             );
           })}
         </div>

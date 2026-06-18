@@ -5,6 +5,7 @@ import { PRESENTER_SCRIPTS, type PresenterScript } from '../data/presenterScript
 interface PresenterScriptsProps {
   onSimulateStt: (transcript: string) => void;
   onApplyCorrection: (transcript: string) => void;
+  onRunPresenterScript: (script: PresenterScript) => void;
   isListening: boolean;
 }
 
@@ -26,6 +27,7 @@ function OutcomeBadge({ script }: { script: PresenterScript }) {
 export function PresenterScripts({
   onSimulateStt,
   onApplyCorrection,
+  onRunPresenterScript,
   isListening,
 }: PresenterScriptsProps) {
   const [sectionOpen, setSectionOpen] = useState(false);
@@ -122,7 +124,7 @@ export function PresenterScripts({
                     <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-surface-muted">
                       Notes to the panel
                     </p>
-                    <p className="text-[11px] italic leading-relaxed text-white/70">
+                    <p className="text-[11px] italic leading-relaxed whitespace-pre-line text-white/70">
                       {script.presenterCue}
                     </p>
                   </div>
@@ -152,17 +154,11 @@ export function PresenterScripts({
                     <button
                       type="button"
                       onClick={() =>
-                        onApplyCorrection(
-                          script.outcome === 'verified'
-                            ? script.hitlCorrected
-                            : script.hitlCorrected,
-                        )
-                      }
-                      className={`flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-[11px] font-medium transition ${
                         script.outcome === 'verified'
-                          ? 'border border-trust-verified/30 bg-trust-verified/10 text-trust-verified hover:bg-trust-verified/20'
-                          : 'border border-trust-verified/30 bg-trust-verified/10 text-trust-verified hover:bg-trust-verified/20'
-                      }`}
+                          ? onRunPresenterScript(script)
+                          : onApplyCorrection(script.hitlCorrected)
+                      }
+                      className="flex items-center justify-center gap-1.5 rounded-lg border border-trust-verified/30 bg-trust-verified/10 px-3 py-2 text-[11px] font-medium text-trust-verified transition hover:bg-trust-verified/20"
                     >
                       <CheckCircle2 className="h-3 w-3" />
                       {script.outcome === 'hitl'
