@@ -58,6 +58,7 @@ function AppHeader({ status }: { status?: TrustStatus }) {
 
 export function SmartphonePreview({ result, workflowStage, onReset }: SmartphonePreviewProps) {
   const [phoneView, setPhoneView] = useState<PhoneView>('invoice');
+  const [mediationMode, setMediationMode] = useState<'review' | 'modify'>('review');
   const [resolvedResult, setResolvedResult] = useState<HandshakeResult | null>(null);
   const [sentMeta, setSentMeta] = useState({ total: 0, lineCount: 0, invoiceNumber: 'INV-000000' });
 
@@ -85,10 +86,11 @@ export function SmartphonePreview({ result, workflowStage, onReset }: Smartphone
         : 'border-surface-border';
 
   const handleMediationConfirm = (lineItems: InvoiceLineItem[]) => {
-    if (!result) return;
+    const base = displayResult ?? result;
+    if (!base) return;
     const { subtotal, tax, total } = computeInvoiceTotals(lineItems);
     const verified: HandshakeResult = {
-      ...result,
+      ...base,
       status: 'verified',
       lineItems,
       gaps: [],
@@ -99,6 +101,11 @@ export function SmartphonePreview({ result, workflowStage, onReset }: Smartphone
     };
     setResolvedResult(verified);
     setPhoneView('invoice');
+  };
+
+  const openMediation = (mode: 'review' | 'modify') => {
+    setMediationMode(mode);
+    setPhoneView('mediation');
   };
 
   const handleSend = () => {
@@ -156,9 +163,10 @@ export function SmartphonePreview({ result, workflowStage, onReset }: Smartphone
             </div>
           )}
 
-          {phoneView === 'mediation' && result && (
+          {phoneView === 'mediation' && displayResult && (
             <InvoiceMediationScreen
-              result={result}
+              result={displayResult}
+              mode={mediationMode}
               onConfirm={handleMediationConfirm}
               onBack={() => setPhoneView('invoice')}
             />
@@ -269,15 +277,34 @@ export function SmartphonePreview({ result, workflowStage, onReset }: Smartphone
                 </span>
               </div>
 
-              <button
-                type="button"
-                onClick={isAmber ? () => setPhoneView('mediation') : handleSend}
-                className={`mt-3 w-full rounded-xl py-2.5 text-xs font-semibold text-white transition active:scale-[0.98] ${
-                  isVerified ? 'bg-green-500 hover:bg-green-600' : isAmber ? 'bg-amber-500 hover:bg-amber-600' : 'bg-indigo-600'
-                }`}
-              >
-                {isVerified ? 'Send to Client' : isAmber ? 'Review & Correct' : 'Preview'}
-              </button>
+              {isVerified ? (
+                <div className="mt-3 space-y-2">
+                  <button
+                    type="button"
+                    onClick={handleSend}
+                    className="w-full rounded-xl bg-green-500 py-2.5 text-xs font-semibold text-white transition hover:bg-green-600 active:scale-[0.98]"
+                  >
+                    Send to Client
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openMediation('modify')}
+                    className="w-full rounded-xl border border-gray-200 bg-white py-2.5 text-xs font-semibold text-gray-700 transition hover:border-gray-300 hover:bg-gray-50 active:scale-[0.98]"
+                  >
+                    Modify line items
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={isAmber ? () => openMediation('review') : handleSend}
+                  className={`mt-3 w-full rounded-xl py-2.5 text-xs font-semibold text-white transition active:scale-[0.98] ${
+                    isAmber ? 'bg-amber-500 hover:bg-amber-600' : 'bg-indigo-600'
+                  }`}
+                >
+                  {isAmber ? 'Review & Correct' : 'Preview'}
+                </button>
+              )}
             </div>
           )}
         </PhoneChrome>
