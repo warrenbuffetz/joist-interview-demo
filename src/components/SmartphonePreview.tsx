@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   CheckCircle2,
   AlertTriangle,
@@ -87,8 +87,23 @@ export function SmartphonePreview({ result, workflowStage, onReset }: Smartphone
   const [mediationMode, setMediationMode] = useState<'review' | 'modify'>('review');
   const [resolvedResult, setResolvedResult] = useState<HandshakeResult | null>(null);
   const [sentMeta, setSentMeta] = useState({ total: 0, lineCount: 0, invoiceNumber: 'INV-000000' });
+  const prevWorkflowStageRef = useRef(workflowStage);
+  const [showNewCaptureHint, setShowNewCaptureHint] = useState(false);
 
   const isLoading = !result && (workflowStage === 'listening' || workflowStage === 'drafting');
+
+  useEffect(() => {
+    if (workflowStage === 'listening' || workflowStage === 'drafting') {
+      const wasComplete = prevWorkflowStageRef.current === 'complete';
+      setShowNewCaptureHint(wasComplete);
+      setPhoneView('invoice');
+      setResolvedResult(null);
+      setMediationMode('review');
+    } else {
+      setShowNewCaptureHint(false);
+    }
+    prevWorkflowStageRef.current = workflowStage;
+  }, [workflowStage]);
 
   useEffect(() => {
     if (result) {
@@ -123,15 +138,17 @@ export function SmartphonePreview({ result, workflowStage, onReset }: Smartphone
       : getInvoiceBannerConfig('ready')
     : null;
 
-  const borderGlow = isInvoiceReady
-    ? 'shadow-glow border-trust-verified/40'
-    : aggregateStatus === 'critical_review'
-      ? 'border-red-300/60 shadow-[0_0_24px_rgba(239,68,68,0.15)]'
-      : needsLineReview || isHandshakeAmber
-        ? 'shadow-glow-amber border-trust-amber/40'
-        : phoneView === 'success'
-          ? 'shadow-glow border-trust-verified/40'
-          : 'border-surface-border';
+  const borderGlow = isLoading
+    ? 'border-surface-border'
+    : isInvoiceReady
+      ? 'shadow-glow border-trust-verified/40'
+      : aggregateStatus === 'critical_review'
+        ? 'border-red-300/60 shadow-[0_0_24px_rgba(239,68,68,0.15)]'
+        : needsLineReview || isHandshakeAmber
+          ? 'shadow-glow-amber border-trust-amber/40'
+          : phoneView === 'success'
+            ? 'shadow-glow border-trust-verified/40'
+            : 'border-surface-border';
 
   const draftTitle = isInvoiceReady
     ? isUserVerifiedDraft
@@ -142,14 +159,10 @@ export function SmartphonePreview({ result, workflowStage, onReset }: Smartphone
   const handleMediationConfirm = (lineItems: InvoiceLineItem[]) => {
     const base = displayResult ?? result;
     if (!base) return;
-    const isReviewConfirm = mediationMode === 'review';
-    const finalizedLineItems = isReviewConfirm
+    const isHumanConfirm = mediationMode === 'review' || mediationMode === 'modify';
+    const finalizedLineItems = isHumanConfirm
       ? applyHumanVerificationToLineItems(lineItems)
       : lineItems;
-    const hasManualModifications = invoiceHasUserModifications(
-      finalizedLineItems,
-      isReviewConfirm,
-    );
     const { subtotal, tax, total } = computeInvoiceTotals(finalizedLineItems);
     const verified: HandshakeResult = {
       ...base,
@@ -160,7 +173,7 @@ export function SmartphonePreview({ result, workflowStage, onReset }: Smartphone
       tax,
       total,
       trustScore: 1,
-      isHumanVerified: hasManualModifications,
+      isHumanVerified: isHumanConfirm,
     };
     setResolvedResult(verified);
     setPhoneView('invoice');
@@ -208,7 +221,13 @@ export function SmartphonePreview({ result, workflowStage, onReset }: Smartphone
         <PhoneChrome
           borderGlow={borderGlow}
           headerRight={
-            phoneView === 'invoice' && displayResult ? (
+            isLoading ? (
+              <AppHeader
+                aggregateStatus="ready"
+                isHandshakeVerified={false}
+                showStatusBadge={false}
+              />
+            ) : phoneView === 'invoice' && displayResult ? (
               <AppHeader
                 aggregateStatus={aggregateStatus}
                 isHandshakeVerified={isHandshakeVerified}
@@ -222,16 +241,19 @@ export function SmartphonePreview({ result, workflowStage, onReset }: Smartphone
             )
           }
         >
-          {isLoading && (
+          {isLoading ? (
             <div className="flex flex-col items-center justify-center bg-gray-50 px-4 py-16">
               <div className="mb-4 h-10 w-10 animate-spin rounded-full border-2 border-indigo-200 border-t-indigo-600" />
               <p className="text-xs font-medium text-gray-600">
                 {workflowStage === 'listening' ? 'Listening…' : 'Drafting Invoice…'}
               </p>
+              {showNewCaptureHint && (
+                <p className="mt-1 text-[10px] text-gray-400">Starting new capture</p>
+              )}
             </div>
-          )}
-
-          {!result && !isLoading && phoneView === 'invoice' && (
+          ) : (
+            <>
+          {!result && phoneView === 'invoice' && (
             <div className="flex flex-col items-center justify-center bg-gray-50 px-4 py-16 text-center">
               <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-gray-200">
                 <MicPlaceholder />
@@ -397,6 +419,8 @@ export function SmartphonePreview({ result, workflowStage, onReset }: Smartphone
                 </button>
               )}
             </div>
+          )}
+            </>
           )}
         </PhoneChrome>
       </div>

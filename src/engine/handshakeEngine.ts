@@ -264,40 +264,44 @@ function extractQuantity(text: string, itemName: string): number {
   return 1;
 }
 
-function matchCatalogItem(transcript: string): { item: CatalogItem; alias: string; confidence: number } | null {
+function collectCatalogMatches(
+  transcript: string,
+): Array<{ item: CatalogItem; alias: string; confidence: number }> {
   const normalized = normalizeText(transcript);
-  let bestMatch: { item: CatalogItem; alias: string; confidence: number } | null = null;
+  const hits: Array<{ item: CatalogItem; alias: string; confidence: number }> = [];
 
   for (const item of CatalogData) {
     for (const alias of item.aliases) {
       const normalizedAlias = normalizeText(alias);
       if (normalized.includes(normalizedAlias)) {
-        const confidence = Math.min(0.98, 0.7 + normalizedAlias.length / normalized.length);
-        if (!bestMatch || confidence > bestMatch.confidence) {
-          bestMatch = { item, alias, confidence };
-        }
+        const confidence = Math.min(
+          0.98,
+          0.72 + normalizedAlias.length / Math.max(normalized.length, 1),
+        );
+        hits.push({ item, alias, confidence });
       }
     }
   }
 
-  return bestMatch;
+  return hits.sort(
+    (a, b) => b.alias.length - a.alias.length || b.confidence - a.confidence,
+  );
+}
+
+function matchCatalogItem(transcript: string): { item: CatalogItem; alias: string; confidence: number } | null {
+  const hits = collectCatalogMatches(transcript);
+  return hits[0] ?? null;
 }
 
 function findAllMatches(transcript: string): Array<{ item: CatalogItem; alias: string; confidence: number }> {
-  const normalized = normalizeText(transcript);
-  const matches: Array<{ item: CatalogItem; alias: string; confidence: number }> = [];
+  const hits = collectCatalogMatches(transcript);
   const usedSkus = new Set<string>();
+  const matches: Array<{ item: CatalogItem; alias: string; confidence: number }> = [];
 
-  for (const item of CatalogData) {
-    for (const alias of item.aliases) {
-      const normalizedAlias = normalizeText(alias);
-      if (normalized.includes(normalizedAlias) && !usedSkus.has(item.sku)) {
-        const confidence = Math.min(0.98, 0.72 + normalizedAlias.length / Math.max(normalized.length, 1));
-        matches.push({ item, alias, confidence });
-        usedSkus.add(item.sku);
-        break;
-      }
-    }
+  for (const hit of hits) {
+    if (usedSkus.has(hit.item.sku)) continue;
+    matches.push(hit);
+    usedSkus.add(hit.item.sku);
   }
 
   return matches.sort((a, b) => b.confidence - a.confidence);

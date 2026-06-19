@@ -168,6 +168,7 @@ function App() {
   const panelLiveTranscript = speech.isListening
     ? speech.liveTranscript
     : displayTranscript;
+  const hasCompletedSession = Boolean(handshakeResult) && workflowStage === 'complete';
 
   return (
     <div className="min-h-screen bg-surface">
@@ -198,7 +199,7 @@ function App() {
 
       <main className="mx-auto max-w-[1600px] px-6 py-6">
         <div className="grid min-h-[calc(100vh-88px)] grid-cols-1 gap-4 lg:grid-cols-3">
-          <section className="flex min-h-[480px] flex-col overflow-y-auto rounded-2xl border border-surface-border bg-surface-raised/50 p-6 lg:min-h-0">
+          <section className="flex min-h-[480px] flex-col overflow-y-auto rounded-2xl border border-surface-border bg-surface-raised/50 p-6 lg:min-h-0 lg:max-h-[calc(100vh-88px)]">
             <VoiceInputPanel
               status={isProcessing ? 'mapping' : speech.status}
               interimTranscript={speech.interimTranscript}
@@ -215,6 +216,7 @@ function App() {
               onSimulateStt={processTranscript}
               onApplyCorrection={processHumanCorrection}
               onRunPresenterScript={processPresenterScript}
+              hasCompletedSession={hasCompletedSession}
             />
           </section>
 

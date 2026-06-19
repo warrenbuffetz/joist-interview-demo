@@ -1,20 +1,18 @@
 import { useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Search, ShieldCheck } from 'lucide-react';
 import { CatalogData } from '../../data/catalogData';
+import { filterCatalogItems } from '../../utils/catalogSummary';
 import type { HandshakeResult, InvoiceLineItem } from '../../engine/handshakeEngine';
 import type { AutomationStatus } from '../../types/automationStatus';
 import { resolveAutomationStatus } from '../../types/automationStatus';
 import {
   buildMediationLineItems,
   computeInvoiceTotals,
-  applyHumanVerificationToLineItems,
   type LaborSelection,
 } from '../../utils/invoiceTotals';
 import {
-  applyEditedFlagsToLineItems,
   buildInitialLaborSelections,
   buildInitialPhysicalQty,
-  getEditedSkusFromBaseline,
 } from '../../utils/mediationBaseline';
 import { isLaborSku } from '../../utils/laborTime';
 import { MediationLineItemCard } from './mediation/MediationLineItemCard';
@@ -82,16 +80,7 @@ export function InvoiceMediationScreen({
     });
   };
 
-  const filteredCatalog = useMemo(() => {
-    const q = search.toLowerCase().trim();
-    if (!q) return CatalogData;
-    return CatalogData.filter(
-      (item) =>
-        item.name.toLowerCase().includes(q) ||
-        item.sku.toLowerCase().includes(q) ||
-        item.category.toLowerCase().includes(q),
-    );
-  }, [search]);
+  const filteredCatalog = useMemo(() => filterCatalogItems(search), [search]);
 
   const selectedLineItems = useMemo(
     () => buildMediationLineItems(CatalogData, physicalQty, laborSelections, automationBySku),
@@ -184,13 +173,7 @@ export function InvoiceMediationScreen({
   };
 
   const handleConfirm = () => {
-    if (isModify) {
-      const changedSkus = getEditedSkusFromBaseline(result, physicalQty, laborSelections);
-      const finalized = applyEditedFlagsToLineItems(selectedLineItems, changedSkus);
-      onConfirm(finalized);
-      return;
-    }
-    onConfirm(applyHumanVerificationToLineItems(selectedLineItems));
+    onConfirm(selectedLineItems);
   };
 
   return (

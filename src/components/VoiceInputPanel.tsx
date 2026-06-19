@@ -2,6 +2,7 @@ import { Mic, MicOff, RotateCcw, Sparkles, AlertCircle } from 'lucide-react';
 import type { TranscriptionStatus } from '../hooks/useSpeechToText';
 import type { PresenterScript } from '../data/presenterScripts';
 import { PresenterScripts } from './PresenterScripts';
+import { CatalogPlaygroundCard } from './CatalogPlaygroundCard';
 
 const STATUS_LABELS: Record<TranscriptionStatus, string> = {
   idle: 'Ready to capture',
@@ -37,6 +38,7 @@ interface VoiceInputPanelProps {
   onSimulateStt: (transcript: string) => void;
   onApplyCorrection: (transcript: string) => void;
   onRunPresenterScript: (script: PresenterScript) => void;
+  hasCompletedSession?: boolean;
 }
 
 export function VoiceInputPanel({
@@ -55,13 +57,20 @@ export function VoiceInputPanel({
   onSimulateStt,
   onApplyCorrection,
   onRunPresenterScript,
+  hasCompletedSession = false,
 }: VoiceInputPanelProps) {
   const isActive = isListening || status === 'transcribing' || status === 'mapping';
   const showInterimCursor = isListening && Boolean(interimTranscript.trim());
+  const idleStatusLabel = hasCompletedSession ? 'New invoice' : STATUS_LABELS.idle;
+  const idleHelperText = isListening
+    ? 'Tap again to stop · Speak clearly'
+    : hasCompletedSession
+      ? 'Tap to start a new invoice'
+      : 'Tap to begin voice capture';
 
   return (
     <div className="flex h-full flex-col">
-      <header className="mb-6">
+      <header className="mb-4 shrink-0">
         <div className="mb-1 flex items-center gap-2">
           <Sparkles className="h-4 w-4 text-indigo-400" />
           <span className="text-xs font-semibold uppercase tracking-widest text-indigo-400">
@@ -74,7 +83,9 @@ export function VoiceInputPanel({
         </p>
       </header>
 
-      <div className="flex flex-1 flex-col items-center justify-center">
+      <CatalogPlaygroundCard onTryPhrase={onSimulateStt} disabled={isActive} />
+
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center">
         <div className="relative mb-8">
           {isListening && (
             <>
@@ -107,13 +118,11 @@ export function VoiceInputPanel({
             <span className="h-2 w-2 animate-pulse rounded-full bg-indigo-400" />
           )}
           <span className={`text-sm font-medium ${STATUS_COLORS[status]}`}>
-            {STATUS_LABELS[status]}
+            {status === 'idle' ? idleStatusLabel : STATUS_LABELS[status]}
           </span>
         </div>
 
-        <p className="mb-6 text-center text-xs text-surface-muted">
-          {isListening ? 'Tap again to stop · Speak clearly' : 'Tap to begin voice capture'}
-        </p>
+        <p className="mb-6 text-center text-xs text-surface-muted">{idleHelperText}</p>
 
         <div className="w-full rounded-2xl border border-surface-border bg-surface-raised/60 p-4 backdrop-blur-sm">
           <p className="mb-2 text-xs font-medium uppercase tracking-wider text-surface-muted">
@@ -147,7 +156,7 @@ export function VoiceInputPanel({
         </div>
       )}
 
-      <footer className="mt-auto space-y-3 border-t border-surface-border pt-4">
+      <footer className="mt-auto shrink-0 space-y-3 border-t border-surface-border pt-4">
         <p className="text-xs text-surface-muted">Quick shortcuts</p>
         <div className="flex gap-2">
           <button
