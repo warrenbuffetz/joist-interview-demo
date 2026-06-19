@@ -1,5 +1,7 @@
 import type { CatalogItem } from '../data/catalogData';
-import type { InvoiceLineItem } from '../engine/handshakeEngine';
+import type { HandshakeResult, InvoiceLineItem } from '../engine/handshakeEngine';
+import type { AutomationStatus } from '../types/automationStatus';
+import { automationStatusFromScore } from '../types/automationStatus';
 import { computeLaborLineTotal, isLaborSku, minutesToDisplayHours } from './laborTime';
 import { computeTax, computeTotalWithTax } from './tax';
 
@@ -22,6 +24,7 @@ export function lineItemFromCatalog(
   quantity = 1,
 ): InvoiceLineItem {
   const lineTotal = Math.round(quantity * item.unitPrice * 100) / 100;
+  const confidenceScore = 100;
   return {
     sku: item.sku,
     name: item.name,
@@ -30,6 +33,8 @@ export function lineItemFromCatalog(
     unit: item.unit,
     lineTotal,
     confidence: 1,
+    confidenceScore,
+    automationStatus: automationStatusFromScore(confidenceScore),
     matchedFrom: 'manual selection',
     itemType: 'physical',
   };
@@ -42,6 +47,7 @@ export function lineItemFromLabor(
 ): InvoiceLineItem {
   const durationHours = minutes / 60;
   const lineTotal = computeLaborLineTotal(item.unitPrice, minutes, crewSize);
+  const confidenceScore = 100;
   return {
     sku: item.sku,
     name: item.name,
@@ -50,6 +56,8 @@ export function lineItemFromLabor(
     unit: item.unit,
     lineTotal,
     confidence: 1,
+    confidenceScore,
+    automationStatus: automationStatusFromScore(confidenceScore),
     matchedFrom: 'manual selection',
     itemType: 'labor',
     durationMinutes: minutes,
@@ -57,10 +65,40 @@ export function lineItemFromLabor(
   };
 }
 
+/** Elevate all lines to contractor-approved tier after HITL confirm — clears row pills. */
+export function applyHumanVerificationToLineItems(
+  lineItems: InvoiceLineItem[],
+): InvoiceLineItem[] {
+  return lineItems.map((item) => ({
+    ...item,
+    automationStatus: 'user_verified',
+    isHumanEdited: true,
+  }));
+}
+
+/** Presenter Step 2 / human correction — contractor-approved draft, ready to send. */
+export function finalizeHumanCorrectedResult(result: HandshakeResult): HandshakeResult {
+  const lineItems = applyHumanVerificationToLineItems(result.lineItems);
+  const { subtotal, tax, total } = computeInvoiceTotals(lineItems);
+
+  return {
+    ...result,
+    status: 'verified',
+    lineItems,
+    gaps: [],
+    subtotal,
+    tax,
+    total,
+    trustScore: 1,
+    isHumanVerified: true,
+  };
+}
+
 export function buildMediationLineItems(
   catalog: CatalogItem[],
   physicalQty: Record<string, number>,
   laborSelections: Record<string, LaborSelection>,
+  automationBySku?: Record<string, AutomationStatus>,
 ): InvoiceLineItem[] {
   const items: InvoiceLineItem[] = [];
 
@@ -68,14 +106,22 @@ export function buildMediationLineItems(
     if (isLaborSku(item.sku)) {
       const selection = laborSelections[item.sku];
       if (selection) {
-        items.push(lineItemFromLabor(item, selection.minutes, selection.crewSize));
+        const line = lineItemFromLabor(item, selection.minutes, selection.crewSize);
+        items.push({
+          ...line,
+          automationStatus: automationBySku?.[item.sku] ?? line.automationStatus,
+        });
       }
       continue;
     }
 
     const quantity = physicalQty[item.sku];
     if (quantity != null) {
-      items.push(lineItemFromCatalog(item, quantity));
+      const line = lineItemFromCatalog(item, quantity);
+      items.push({
+        ...line,
+        automationStatus: automationBySku?.[item.sku] ?? line.automationStatus,
+      });
     }
   }
 

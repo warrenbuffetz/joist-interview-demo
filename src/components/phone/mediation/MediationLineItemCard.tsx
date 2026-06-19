@@ -1,4 +1,5 @@
 import type { CatalogItem } from '../../../data/catalogData';
+import type { AutomationStatus } from '../../../types/automationStatus';
 import { isLaborSku } from '../../../utils/laborTime';
 import { LaborLineItemCard } from './LaborLineItemCard';
 import { PhysicalLineItemCard } from './PhysicalLineItemCard';
@@ -9,13 +10,14 @@ interface MediationLineItemCardProps {
   quantity: number;
   laborMinutes: number;
   crewSize: number;
-  wasVoiceMatch: boolean;
+  automationStatus: AutomationStatus;
   onToggle: () => void;
   onRemove: () => void;
   onAdjustQty: (delta: number) => void;
   onDecreaseOrRemove: () => void;
   onLaborMinutesChange: (minutes: number) => void;
   onCrewSizeChange: (crewSize: number) => void;
+  onUserVerify: () => void;
 }
 
 export function MediationLineItemCard({
@@ -24,13 +26,14 @@ export function MediationLineItemCard({
   quantity,
   laborMinutes,
   crewSize,
-  wasVoiceMatch,
+  automationStatus,
   onToggle,
   onRemove,
   onAdjustQty,
   onDecreaseOrRemove,
   onLaborMinutesChange,
   onCrewSizeChange,
+  onUserVerify,
 }: MediationLineItemCardProps) {
   if (isLaborSku(item.sku)) {
     return (
@@ -39,11 +42,12 @@ export function MediationLineItemCard({
         isOn={isOn}
         minutes={laborMinutes}
         crewSize={crewSize}
-        wasVoiceMatch={wasVoiceMatch}
+        automationStatus={automationStatus}
         onToggle={onToggle}
         onRemove={onRemove}
         onMinutesChange={onLaborMinutesChange}
         onCrewSizeChange={onCrewSizeChange}
+        onUserVerify={onUserVerify}
       />
     );
   }
@@ -53,11 +57,12 @@ export function MediationLineItemCard({
       item={item}
       isOn={isOn}
       quantity={quantity}
-      wasVoiceMatch={wasVoiceMatch}
+      automationStatus={automationStatus}
       onToggle={onToggle}
       onRemove={onRemove}
       onAdjustQty={onAdjustQty}
       onDecreaseOrRemove={onDecreaseOrRemove}
+      onUserVerify={onUserVerify}
     />
   );
 }

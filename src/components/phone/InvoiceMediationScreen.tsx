@@ -2,11 +2,20 @@ import { useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Search, ShieldCheck } from 'lucide-react';
 import { CatalogData } from '../../data/catalogData';
 import type { HandshakeResult, InvoiceLineItem } from '../../engine/handshakeEngine';
+import type { AutomationStatus } from '../../types/automationStatus';
+import { resolveAutomationStatus } from '../../types/automationStatus';
 import {
   buildMediationLineItems,
   computeInvoiceTotals,
+  applyHumanVerificationToLineItems,
   type LaborSelection,
 } from '../../utils/invoiceTotals';
+import {
+  applyEditedFlagsToLineItems,
+  buildInitialLaborSelections,
+  buildInitialPhysicalQty,
+  getEditedSkusFromBaseline,
+} from '../../utils/mediationBaseline';
 import { isLaborSku } from '../../utils/laborTime';
 import { MediationLineItemCard } from './mediation/MediationLineItemCard';
 
@@ -18,33 +27,6 @@ interface InvoiceMediationScreenProps {
 }
 
 const DEFAULT_LABOR_MINUTES = 60;
-
-function hoursToMinutes(hours: number): number {
-  return Math.round(hours * 60);
-}
-
-function buildInitialPhysicalQty(result: HandshakeResult): Record<string, number> {
-  const initial: Record<string, number> = {};
-  result.lineItems.forEach((item) => {
-    if (!isLaborSku(item.sku)) {
-      initial[item.sku] = item.quantity;
-    }
-  });
-  return initial;
-}
-
-function buildInitialLaborSelections(result: HandshakeResult): Record<string, LaborSelection> {
-  const initial: Record<string, LaborSelection> = {};
-  result.lineItems.forEach((item) => {
-    if (isLaborSku(item.sku)) {
-      initial[item.sku] = {
-        minutes: item.durationMinutes ?? hoursToMinutes(item.quantity),
-        crewSize: item.crewSize ?? 1,
-      };
-    }
-  });
-  return initial;
-}
 
 export function InvoiceMediationScreen({
   result,
@@ -59,6 +41,46 @@ export function InvoiceMediationScreen({
   const [laborSelections, setLaborSelections] = useState<Record<string, LaborSelection>>(() =>
     buildInitialLaborSelections(result),
   );
+  const [userVerifiedSkus, setUserVerifiedSkus] = useState<Set<string>>(() => new Set());
+  const [editedSkus, setEditedSkus] = useState<Set<string>>(() => new Set());
+
+  const sourceLineBySku = useMemo(() => {
+    const map = new Map<string, InvoiceLineItem>();
+    result.lineItems.forEach((line) => map.set(line.sku, line));
+    return map;
+  }, [result.lineItems]);
+
+  const automationBySku = useMemo(() => {
+    const map: Record<string, AutomationStatus> = {};
+    const allSkus = new Set([...Object.keys(physicalQty), ...Object.keys(laborSelections)]);
+    for (const sku of allSkus) {
+      if (editedSkus.has(sku) || userVerifiedSkus.has(sku)) {
+        map[sku] = 'user_verified';
+      } else {
+        const source = sourceLineBySku.get(sku);
+        map[sku] = source ? resolveAutomationStatus(source) : 'user_verified';
+      }
+    }
+    return map;
+  }, [physicalQty, laborSelections, userVerifiedSkus, editedSkus, sourceLineBySku]);
+
+  const markEdited = (sku: string) => {
+    setEditedSkus((prev) => {
+      if (prev.has(sku)) return prev;
+      return new Set(prev).add(sku);
+    });
+  };
+
+  const markUserVerified = (sku: string) => {
+    markEdited(sku);
+    setUserVerifiedSkus((prev) => {
+      if (prev.has(sku)) return prev;
+      const source = sourceLineBySku.get(sku);
+      const status = source ? resolveAutomationStatus(source) : 'user_verified';
+      if (status !== 'medium' && status !== 'low') return prev;
+      return new Set(prev).add(sku);
+    });
+  };
 
   const filteredCatalog = useMemo(() => {
     const q = search.toLowerCase().trim();
@@ -72,8 +94,8 @@ export function InvoiceMediationScreen({
   }, [search]);
 
   const selectedLineItems = useMemo(
-    () => buildMediationLineItems(CatalogData, physicalQty, laborSelections),
-    [physicalQty, laborSelections],
+    () => buildMediationLineItems(CatalogData, physicalQty, laborSelections, automationBySku),
+    [physicalQty, laborSelections, automationBySku],
   );
 
   const totals = computeInvoiceTotals(selectedLineItems);
@@ -84,6 +106,7 @@ export function InvoiceMediationScreen({
     isLaborSku(sku) ? laborSelections[sku] != null : physicalQty[sku] != null;
 
   const toggleItem = (sku: string) => {
+    markEdited(sku);
     if (isLaborSku(sku)) {
       setLaborSelections((prev) => {
         const next = { ...prev };
@@ -109,6 +132,7 @@ export function InvoiceMediationScreen({
   };
 
   const adjustQty = (sku: string, delta: number) => {
+    markEdited(sku);
     setPhysicalQty((prev) => {
       const current = prev[sku] ?? 1;
       const nextQty = Math.max(1, Math.min(99, current + delta));
@@ -117,6 +141,7 @@ export function InvoiceMediationScreen({
   };
 
   const removeItem = (sku: string) => {
+    markEdited(sku);
     if (isLaborSku(sku)) {
       setLaborSelections((prev) => {
         const next = { ...prev };
@@ -143,6 +168,7 @@ export function InvoiceMediationScreen({
   };
 
   const updateLaborMinutes = (sku: string, minutes: number) => {
+    markEdited(sku);
     setLaborSelections((prev) => ({
       ...prev,
       [sku]: { ...prev[sku], minutes },
@@ -150,10 +176,21 @@ export function InvoiceMediationScreen({
   };
 
   const updateCrewSize = (sku: string, crewSize: number) => {
+    markEdited(sku);
     setLaborSelections((prev) => ({
       ...prev,
       [sku]: { ...prev[sku], crewSize: Math.max(1, crewSize) },
     }));
+  };
+
+  const handleConfirm = () => {
+    if (isModify) {
+      const changedSkus = getEditedSkusFromBaseline(result, physicalQty, laborSelections);
+      const finalized = applyEditedFlagsToLineItems(selectedLineItems, changedSkus);
+      onConfirm(finalized);
+      return;
+    }
+    onConfirm(applyHumanVerificationToLineItems(selectedLineItems));
   };
 
   return (
@@ -226,7 +263,6 @@ export function InvoiceMediationScreen({
         <div className="space-y-2">
           {filteredCatalog.map((item) => {
             const isOn = isItemOn(item.sku);
-            const wasVoiceMatch = result.lineItems.some((l) => l.sku === item.sku);
             const labor = laborSelections[item.sku];
 
             return (
@@ -237,13 +273,14 @@ export function InvoiceMediationScreen({
                 quantity={physicalQty[item.sku] ?? 1}
                 laborMinutes={labor?.minutes ?? DEFAULT_LABOR_MINUTES}
                 crewSize={labor?.crewSize ?? 1}
-                wasVoiceMatch={wasVoiceMatch}
+                automationStatus={isOn ? (automationBySku[item.sku] ?? 'user_verified') : 'user_verified'}
                 onToggle={() => toggleItem(item.sku)}
                 onRemove={() => removeItem(item.sku)}
                 onAdjustQty={(delta) => adjustQty(item.sku, delta)}
                 onDecreaseOrRemove={() => decreaseOrRemove(item.sku)}
                 onLaborMinutesChange={(minutes) => updateLaborMinutes(item.sku, minutes)}
                 onCrewSizeChange={(crewSize) => updateCrewSize(item.sku, crewSize)}
+                onUserVerify={() => markUserVerified(item.sku)}
               />
             );
           })}
@@ -260,7 +297,7 @@ export function InvoiceMediationScreen({
         <button
           type="button"
           disabled={selectedCount === 0}
-          onClick={() => onConfirm(selectedLineItems)}
+          onClick={handleConfirm}
           className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-indigo-600 py-2.5 text-xs font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <ShieldCheck className="h-3.5 w-3.5" />

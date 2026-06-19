@@ -1,4 +1,10 @@
 import type { ScenarioBillingOverride } from '../utils/scenarioBilling';
+import {
+  CREW_NLP_HAPPY_PATH_BILLING_OVERRIDE,
+  CREW_NLP_HAPPY_PATH_TRANSCRIPT,
+  HAPPY_PATH_BILLING_OVERRIDE,
+  HAPPY_PATH_TRANSCRIPT,
+} from './happyPathScenario';
 
 export type ScriptOutcome = 'verified' | 'hitl';
 
@@ -26,39 +32,31 @@ export interface PresenterScript {
 export const PRESENTER_SCRIPTS: PresenterScript[] = [
   {
     id: 'clean-read',
-    title: 'Script 1 — Clean Job-Site Read',
-    tag: 'Happy path',
+    title: 'Script 1 — Flawless Thermostat Install',
+    tag: 'Thermostat · wire · labor',
     outcome: 'verified',
-    readAloud:
-      'Install two GFCI outlets in the kitchen, replace the HVAC filter sixteen by twenty five, and bill one hour of standard labor.',
+    readAloud: HAPPY_PATH_TRANSCRIPT,
     deliveryNotes:
-      'Speak clearly at a normal pace. Pause briefly between each line item. Face the phone or mic directly.',
+      'Speak clearly. This script demonstrates a flawless automation loop where every spoken entity maps perfectly to a high-confidence match in the company product catalog.',
     presenterCue:
-      'This is the ideal flow — voice maps cleanly to verified catalog SKUs and the invoice is ready to send.',
-    simulateStt:
-      'Install two GFCI outlets in the kitchen, replace the HVAC filter sixteen by twenty five, and bill one hour of standard labor.',
-    hitlCorrected:
-      'Install two GFCI outlets in the kitchen, replace the HVAC filter sixteen by twenty five, and bill one hour of standard labor.',
+      "This is the ideal happy path flow. Because the NLP model resolves all materials and durations with >90% confidence, the UI bypasses all warnings, labels line items seamlessly as 'Auto-filled', and clears the invoice directly for client delivery.",
+    simulateStt: HAPPY_PATH_TRANSCRIPT,
+    hitlCorrected: HAPPY_PATH_TRANSCRIPT,
+    billingOverride: HAPPY_PATH_BILLING_OVERRIDE,
   },
   {
     id: 'crew-plural-nlp',
     title: 'Script 2 — Casual Crew & Duration',
-    tag: 'Verified · NLP',
+    tag: 'Copper · crew · labor',
     outcome: 'verified',
-    readAloud:
-      'Me and a helper spent forty five minutes replacing the copper pipe under the commercial sink.',
+    readAloud: CREW_NLP_HAPPY_PATH_TRANSCRIPT,
     deliveryNotes:
-      "Speak conversationally at a normal pace. Emphasize the phrase 'me and a helper' naturally without pausing, allowing the panel to see how the system handles casual plurals.",
+      "Speak conversationally at a normal pace. Emphasize 'me and a helper' naturally — the NLP model resolves casual crew plurals and duration phrases at high confidence without triggering review.",
     presenterCue:
-      "This path showcases the natural language processing (NLP) model's entity extraction rules for multi-resource attribution, parsing 'me and a helper' as an implicit Crew Size of 2.\n\nProduct Note: To maintain low MVP scope, the system applies a uniform blended rate multiplier here. While commercial field operations often demand tiered apprentice rates or mandatory service minimums, this pattern validates frictionless speed-of-entry for the 80% baseline use case before expanding the schema for complex, contract-specific labor rules.",
-    simulateStt:
-      'Me and a helper spent forty five minutes replacing the copper pipe under the commercial sink.',
-    hitlCorrected:
-      'Me and a helper spent forty five minutes replacing the copper pipe under the commercial sink.',
-    billingOverride: {
-      materials: [{ sku: 'SKU-PLUMB-CP34', quantity: 10 }],
-      labor: { minutes: 45, crewSize: 2 },
-    },
+      "This happy path proves conversational field speech still maps cleanly to catalog SKUs. 'Me and a helper' resolves to a 2-person crew, forty-five minutes bills as 0.75 hr on site, and every line item lands as Auto-filled — invoice is ready to send with no mediation step.",
+    simulateStt: CREW_NLP_HAPPY_PATH_TRANSCRIPT,
+    hitlCorrected: CREW_NLP_HAPPY_PATH_TRANSCRIPT,
+    billingOverride: CREW_NLP_HAPPY_PATH_BILLING_OVERRIDE,
   },
   {
     id: 'accent-slang',

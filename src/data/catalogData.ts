@@ -33,6 +33,28 @@ export const CatalogData: CatalogItem[] = [
     category: 'Electrical',
   },
   {
+    sku: 'SKU-ELEC-SMARTTH',
+    name: 'Smart Thermostat',
+    aliases: ['smart thermostat', 'wifi thermostat', 'programmable thermostat'],
+    unitPrice: 149.99,
+    unit: 'each',
+    category: 'Electrical',
+  },
+  {
+    sku: 'SKU-ELEC-WIRE18',
+    name: 'Thermostat Wire 18/5',
+    aliases: [
+      'thermostat wire',
+      'eighteen five wire',
+      '18/5 wire',
+      '18 5 thermostat wire',
+      'five wire thermostat cable',
+    ],
+    unitPrice: 0.85,
+    unit: 'ft',
+    category: 'Electrical',
+  },
+  {
     sku: 'SKU-LABOR-STD',
     name: 'Standard Labor',
     aliases: ['labor', 'labour', 'hourly labor', 'service call', 'installation labor'],
@@ -50,9 +72,13 @@ export const CatalogData: CatalogItem[] = [
   },
 ];
 
+import { HAPPY_PATH_BILLING_OVERRIDE, HAPPY_PATH_TRANSCRIPT } from './happyPathScenario';
+
 export const DEMO_TRANSCRIPTS = {
-  verified:
-    'Install two GFCI outlets in the kitchen, replace the HVAC filter sixteen by twenty five, and bill one hour of standard labor.',
+  verified: HAPPY_PATH_TRANSCRIPT,
   amber:
     'Replace copper pipe in the basement and add some miscellaneous fittings, maybe around fifty dollars worth.',
 };
+
+/** Quick-verified shortcut — flawless 100% high-confidence happy path. */
+export const DEMO_BILLING_OVERRIDE = HAPPY_PATH_BILLING_OVERRIDE;

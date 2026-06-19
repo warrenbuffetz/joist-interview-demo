@@ -8,12 +8,13 @@ import {
   type HandshakeResult,
   type HandshakeLogEntry,
 } from './engine/handshakeEngine';
-import { DEMO_TRANSCRIPTS } from './data/catalogData';
+import { DEMO_BILLING_OVERRIDE, DEMO_TRANSCRIPTS } from './data/catalogData';
 import type { PresenterScript } from './data/presenterScripts';
 import {
   applyScenarioBilling,
   type ScenarioBillingOverride,
 } from './utils/scenarioBilling';
+import { finalizeHumanCorrectedResult } from './utils/invoiceTotals';
 
 type WorkflowStage = 'idle' | 'listening' | 'drafting' | 'complete';
 
@@ -85,6 +86,37 @@ function App() {
     [cancelRun, finishHandshake],
   );
 
+  const processHumanCorrection = useCallback(
+    (transcript: string) => {
+      cancelRun();
+      const runId = runIdRef.current;
+
+      setActiveTranscript(transcript);
+      setWorkflowStage('drafting');
+      setIsProcessing(true);
+      setHandshakeResult(null);
+      setDisplayLogs([]);
+
+      const result = finalizeHumanCorrectedResult(runHandshakeEngine(transcript));
+      const validLogs = result.logs.filter(isValidLog);
+
+      validLogs.forEach((log, i) => {
+        setTimeout(() => {
+          if (runId !== runIdRef.current) return;
+          setDisplayLogs((prev) => [...prev, log]);
+          if (i === validLogs.length - 1) {
+            finishHandshake(result, runId);
+          }
+        }, i * 150);
+      });
+
+      if (validLogs.length === 0) {
+        finishHandshake(result, runId);
+      }
+    },
+    [cancelRun, finishHandshake],
+  );
+
   const processPresenterScript = useCallback(
     (script: PresenterScript) => {
       processTranscript(script.readAloud, script.billingOverride);
@@ -124,7 +156,7 @@ function App() {
   }, [speech]);
 
   const handleDemoVerified = useCallback(() => {
-    processTranscript(DEMO_TRANSCRIPTS.verified);
+    processTranscript(DEMO_TRANSCRIPTS.verified, DEMO_BILLING_OVERRIDE);
   }, [processTranscript]);
 
   const handleDemoAmber = useCallback(() => {
@@ -176,7 +208,7 @@ function App() {
               onDemoVerified={handleDemoVerified}
               onDemoAmber={handleDemoAmber}
               onSimulateStt={processTranscript}
-              onApplyCorrection={processTranscript}
+              onApplyCorrection={processHumanCorrection}
               onRunPresenterScript={processPresenterScript}
             />
           </section>

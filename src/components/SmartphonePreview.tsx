@@ -5,11 +5,25 @@ import {
   Smartphone,
   FileText,
 } from 'lucide-react';
-import type { HandshakeResult, InvoiceLineItem, TrustStatus } from '../engine/handshakeEngine';
+import type { HandshakeResult, InvoiceLineItem } from '../engine/handshakeEngine';
+import {
+  computeInvoiceAggregateStatus,
+  getUserVerifiedBannerConfig,
+  getInvoiceBannerConfig,
+  getInvoiceHeaderBadgeConfig,
+  resolveAutomationStatus,
+} from '../types/automationStatus';
 import { PhoneChrome } from './phone/PhoneChrome';
 import { InvoiceMediationScreen } from './phone/InvoiceMediationScreen';
 import { InvoiceSuccessScreen } from './phone/InvoiceSuccessScreen';
-import { computeInvoiceTotals, formatLineItemCalculation, TAX_LABEL } from '../utils/invoiceTotals';
+import {
+  applyHumanVerificationToLineItems,
+  computeInvoiceTotals,
+  formatLineItemCalculation,
+  TAX_LABEL,
+} from '../utils/invoiceTotals';
+import { invoiceHasUserModifications } from '../utils/mediationBaseline';
+import { LineItemAutomationPill } from './phone/mediation/LineItemAutomationPill';
 
 type PhoneView = 'invoice' | 'mediation' | 'success';
 
@@ -19,27 +33,34 @@ interface SmartphonePreviewProps {
   onReset: () => void;
 }
 
-function StatusBadge({ status }: { status: TrustStatus }) {
-  if (status === 'verified') {
-    return (
-      <div className="flex items-center gap-1 rounded-full bg-trust-verified/20 px-2 py-0.5">
-        <CheckCircle2 className="h-3 w-3 text-trust-verified" />
-        <span className="text-[10px] font-semibold text-trust-verified">VERIFIED</span>
-      </div>
-    );
-  }
-  if (status === 'amber_alert') {
-    return (
-      <div className="flex items-center gap-1 rounded-full bg-trust-amber/20 px-2 py-0.5">
-        <AlertTriangle className="h-3 w-3 text-trust-amber" />
-        <span className="text-[10px] font-semibold text-trust-amber">REVIEW</span>
-      </div>
-    );
-  }
-  return null;
+function InvoiceStatusBadge({
+  aggregateStatus,
+  isHandshakeVerified,
+}: {
+  aggregateStatus: ReturnType<typeof computeInvoiceAggregateStatus>;
+  isHandshakeVerified: boolean;
+}) {
+  const config = getInvoiceHeaderBadgeConfig(aggregateStatus, isHandshakeVerified);
+
+  const Icon = isHandshakeVerified && aggregateStatus === 'ready' ? CheckCircle2 : AlertTriangle;
+
+  return (
+    <div className={`flex items-center gap-1 rounded-full px-2 py-0.5 ${config.className}`}>
+      <Icon className={`h-3 w-3 ${config.iconClassName}`} />
+      <span className={`text-[10px] font-semibold ${config.iconClassName}`}>{config.label}</span>
+    </div>
+  );
 }
 
-function AppHeader({ status }: { status?: TrustStatus }) {
+function AppHeader({
+  aggregateStatus,
+  isHandshakeVerified,
+  showStatusBadge = true,
+}: {
+  aggregateStatus: ReturnType<typeof computeInvoiceAggregateStatus>;
+  isHandshakeVerified: boolean;
+  showStatusBadge?: boolean;
+}) {
   return (
     <div className="flex items-center justify-between">
       <div className="flex items-center gap-2">
@@ -51,7 +72,12 @@ function AppHeader({ status }: { status?: TrustStatus }) {
           <p className="text-[9px] text-gray-400">Autonomous Assistant</p>
         </div>
       </div>
-      {status && <StatusBadge status={status} />}
+      {showStatusBadge && (
+        <InvoiceStatusBadge
+          aggregateStatus={aggregateStatus}
+          isHandshakeVerified={isHandshakeVerified}
+        />
+      )}
     </div>
   );
 }
@@ -64,7 +90,6 @@ export function SmartphonePreview({ result, workflowStage, onReset }: Smartphone
 
   const isLoading = !result && (workflowStage === 'listening' || workflowStage === 'drafting');
 
-  // Reset phone flow when a new handshake result arrives
   useEffect(() => {
     if (result) {
       setPhoneView('invoice');
@@ -73,31 +98,69 @@ export function SmartphonePreview({ result, workflowStage, onReset }: Smartphone
   }, [result?.transcript, result?.status]);
 
   const displayResult = resolvedResult ?? result;
-  const status = displayResult?.status ?? 'idle';
-  const isVerified = status === 'verified';
-  const isAmber = status === 'amber_alert' && !resolvedResult;
+  const handshakeStatus = displayResult?.status ?? 'idle';
+  const isHandshakeVerified = handshakeStatus === 'verified';
+  const isHandshakeAmber = handshakeStatus === 'amber_alert' && !resolvedResult;
 
-  const borderGlow = isVerified
+  const aggregateStatus = displayResult
+    ? computeInvoiceAggregateStatus(displayResult.lineItems)
+    : 'ready';
+
+  const isInvoiceReady = isHandshakeVerified && aggregateStatus === 'ready';
+  const isUserVerifiedDraft =
+    isInvoiceReady &&
+    invoiceHasUserModifications(
+      displayResult?.lineItems ?? [],
+      displayResult?.isHumanVerified,
+    );
+  const needsLineReview =
+    aggregateStatus === 'critical_review' || aggregateStatus === 'warning_review';
+
+  const reviewBanner = needsLineReview ? getInvoiceBannerConfig(aggregateStatus) : null;
+  const readyBanner = isInvoiceReady
+    ? isUserVerifiedDraft
+      ? getUserVerifiedBannerConfig()
+      : getInvoiceBannerConfig('ready')
+    : null;
+
+  const borderGlow = isInvoiceReady
     ? 'shadow-glow border-trust-verified/40'
-    : isAmber
-      ? 'shadow-glow-amber border-trust-amber/40'
-      : phoneView === 'success'
-        ? 'shadow-glow border-trust-verified/40'
-        : 'border-surface-border';
+    : aggregateStatus === 'critical_review'
+      ? 'border-red-300/60 shadow-[0_0_24px_rgba(239,68,68,0.15)]'
+      : needsLineReview || isHandshakeAmber
+        ? 'shadow-glow-amber border-trust-amber/40'
+        : phoneView === 'success'
+          ? 'shadow-glow border-trust-verified/40'
+          : 'border-surface-border';
+
+  const draftTitle = isInvoiceReady
+    ? isUserVerifiedDraft
+      ? 'User Verified Draft'
+      : 'Verified Draft'
+    : 'Draft Under Review';
 
   const handleMediationConfirm = (lineItems: InvoiceLineItem[]) => {
     const base = displayResult ?? result;
     if (!base) return;
-    const { subtotal, tax, total } = computeInvoiceTotals(lineItems);
+    const isReviewConfirm = mediationMode === 'review';
+    const finalizedLineItems = isReviewConfirm
+      ? applyHumanVerificationToLineItems(lineItems)
+      : lineItems;
+    const hasManualModifications = invoiceHasUserModifications(
+      finalizedLineItems,
+      isReviewConfirm,
+    );
+    const { subtotal, tax, total } = computeInvoiceTotals(finalizedLineItems);
     const verified: HandshakeResult = {
       ...base,
       status: 'verified',
-      lineItems,
+      lineItems: finalizedLineItems,
       gaps: [],
       subtotal,
       tax,
       total,
       trustScore: 1,
+      isHumanVerified: hasManualModifications,
     };
     setResolvedResult(verified);
     setPhoneView('invoice');
@@ -109,13 +172,21 @@ export function SmartphonePreview({ result, workflowStage, onReset }: Smartphone
   };
 
   const handleSend = () => {
-    if (!displayResult) return;
+    if (!displayResult || !isInvoiceReady) return;
     setSentMeta({
       total: displayResult.total,
       lineCount: displayResult.lineItems.length,
       invoiceNumber: `INV-${Date.now().toString().slice(-6)}`,
     });
     setPhoneView('success');
+  };
+
+  const handlePrimaryVerifiedAction = () => {
+    if (isInvoiceReady) {
+      handleSend();
+      return;
+    }
+    openMediation(needsLineReview ? 'review' : 'modify');
   };
 
   return (
@@ -138,9 +209,16 @@ export function SmartphonePreview({ result, workflowStage, onReset }: Smartphone
           borderGlow={borderGlow}
           headerRight={
             phoneView === 'invoice' && displayResult ? (
-              <AppHeader status={displayResult.status} />
+              <AppHeader
+                aggregateStatus={aggregateStatus}
+                isHandshakeVerified={isHandshakeVerified}
+              />
             ) : phoneView === 'mediation' ? undefined : phoneView === 'success' ? undefined : (
-              <AppHeader />
+              <AppHeader
+                aggregateStatus="ready"
+                isHandshakeVerified={false}
+                showStatusBadge={false}
+              />
             )
           }
         >
@@ -188,7 +266,7 @@ export function SmartphonePreview({ result, workflowStage, onReset }: Smartphone
 
           {phoneView === 'invoice' && displayResult && (
             <div className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-gray-50 p-4">
-              {isAmber && (
+              {isHandshakeAmber && (
                 <div className="mb-3 rounded-xl border border-trust-amber/40 bg-amber-50 p-2.5">
                   <div className="flex items-start gap-2">
                     <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
@@ -204,23 +282,30 @@ export function SmartphonePreview({ result, workflowStage, onReset }: Smartphone
                 </div>
               )}
 
-              {isVerified && (
-                <div className="mb-3 rounded-xl border border-green-200 bg-green-50 p-2.5">
+              {reviewBanner && isHandshakeVerified && (
+                <div className={`mb-3 rounded-xl border p-2.5 ${reviewBanner.className}`}>
                   <div className="flex items-center gap-2">
-                    <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
-                    <p className="text-[10px] font-semibold text-green-800">
-                      {resolvedResult
-                        ? 'Human Verified — Ready to Send'
-                        : 'Catalog Verified — Ready to Send'}
+                    <AlertTriangle className={`h-3.5 w-3.5 ${reviewBanner.iconClassName}`} />
+                    <p className={`text-[10px] font-semibold ${reviewBanner.iconClassName}`}>
+                      {reviewBanner.title}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {readyBanner && (
+                <div className={`mb-3 rounded-xl border p-2.5 ${readyBanner.className}`}>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className={`h-3.5 w-3.5 ${readyBanner.iconClassName}`} />
+                    <p className={`text-[10px] font-semibold ${readyBanner.iconClassName}`}>
+                      {readyBanner.title}
                     </p>
                   </div>
                 </div>
               )}
 
               <p className="mb-1 text-[10px] font-medium text-gray-400">INVOICE #JOIST-2026</p>
-              <p className="mb-3 text-sm font-bold text-gray-900">
-                {isVerified ? 'Verified Draft' : isAmber ? 'Draft — Needs Review' : 'Draft'}
-              </p>
+              <p className="mb-3 text-sm font-bold text-gray-900">{draftTitle}</p>
 
               <div className="max-h-[140px] space-y-2 overflow-y-auto">
                 {displayResult.lineItems.length > 0 ? (
@@ -232,6 +317,7 @@ export function SmartphonePreview({ result, workflowStage, onReset }: Smartphone
                             {item.name}
                           </p>
                           <p className="text-[9px] text-gray-400">{item.sku}</p>
+                          <LineItemAutomationPill status={resolveAutomationStatus(item)} />
                         </div>
                         <p className="shrink-0 text-[10px] font-bold text-gray-900">
                           ${item.lineTotal.toFixed(2)}
@@ -261,30 +347,35 @@ export function SmartphonePreview({ result, workflowStage, onReset }: Smartphone
                 <div className="mt-2 flex justify-between border-t border-gray-100 pt-2">
                   <span className="text-xs font-bold text-gray-900">Total</span>
                   <span
-                    className={`text-xs font-bold ${isVerified ? 'text-green-600' : isAmber ? 'text-amber-600' : 'text-gray-900'}`}
+                    className={`text-xs font-bold ${
+                      isInvoiceReady
+                        ? 'text-green-600'
+                        : aggregateStatus === 'critical_review'
+                          ? 'text-red-600'
+                          : needsLineReview || isHandshakeAmber
+                            ? 'text-amber-600'
+                            : 'text-gray-900'
+                    }`}
                   >
                     ${displayResult.total.toFixed(2)}
                   </span>
                 </div>
               </div>
 
-              <div className="mt-3 flex items-center justify-between rounded-lg bg-white px-3 py-2 shadow-sm">
-                <span className="text-[9px] text-gray-400">Trust Score</span>
-                <span
-                  className={`text-[10px] font-bold ${isVerified ? 'text-green-600' : isAmber ? 'text-amber-600' : 'text-gray-600'}`}
-                >
-                  {(displayResult.trustScore * 100).toFixed(0)}%
-                </span>
-              </div>
-
-              {isVerified ? (
+              {isHandshakeVerified ? (
                 <div className="mt-3 space-y-2">
                   <button
                     type="button"
-                    onClick={handleSend}
-                    className="w-full rounded-xl bg-green-500 py-2.5 text-xs font-semibold text-white transition hover:bg-green-600 active:scale-[0.98]"
+                    onClick={handlePrimaryVerifiedAction}
+                    className={`w-full rounded-xl py-2.5 text-xs font-semibold text-white transition active:scale-[0.98] ${
+                      isInvoiceReady
+                        ? 'bg-green-500 hover:bg-green-600'
+                        : aggregateStatus === 'critical_review'
+                          ? 'bg-red-500 hover:bg-red-600'
+                          : 'bg-amber-500 hover:bg-amber-600'
+                    }`}
                   >
-                    Send to Client
+                    {isInvoiceReady ? 'Send to Client' : 'Verify & Send'}
                   </button>
                   <button
                     type="button"
@@ -297,12 +388,12 @@ export function SmartphonePreview({ result, workflowStage, onReset }: Smartphone
               ) : (
                 <button
                   type="button"
-                  onClick={isAmber ? () => openMediation('review') : handleSend}
+                  onClick={isHandshakeAmber ? () => openMediation('review') : handleSend}
                   className={`mt-3 w-full rounded-xl py-2.5 text-xs font-semibold text-white transition active:scale-[0.98] ${
-                    isAmber ? 'bg-amber-500 hover:bg-amber-600' : 'bg-indigo-600'
+                    isHandshakeAmber ? 'bg-amber-500 hover:bg-amber-600' : 'bg-indigo-600'
                   }`}
                 >
-                  {isAmber ? 'Review & Correct' : 'Preview'}
+                  {isHandshakeAmber ? 'Review & Correct' : 'Preview'}
                 </button>
               )}
             </div>

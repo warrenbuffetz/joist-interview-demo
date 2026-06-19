@@ -1,6 +1,8 @@
 import { CatalogData, type CatalogItem } from '../data/catalogData';
 import { MATERIAL_DEFAULT_QUANTITIES } from '../data/materialDefaults';
 import type { LineItemType } from '../types/invoice';
+import type { AutomationStatus } from '../types/automationStatus';
+import { automationStatusFromScore } from '../types/automationStatus';
 import { computeLaborLineTotal, LABOR_SKU } from '../utils/laborTime';
 import { computeTax, computeTotalWithTax } from '../utils/tax';
 
@@ -20,6 +22,10 @@ export interface InvoiceLineItem {
   durationMinutes?: number;
   /** Labor only — crew multiplier (min 1). */
   crewSize?: number;
+  confidenceScore?: number;
+  automationStatus?: AutomationStatus;
+  /** Telemetry — true when a contractor manually adjusted this line. */
+  isHumanEdited?: boolean;
 }
 
 export interface TrustGap {
@@ -46,6 +52,8 @@ export interface HandshakeResult {
   tax: number;
   total: number;
   trustScore: number;
+  /** Set after amber/HITL mediation confirm — invoice elevated by contractor review. */
+  isHumanVerified?: boolean;
 }
 
 let logCounter = 0;
@@ -88,6 +96,12 @@ function extractDurationMinutes(transcript: string): number | null {
     'sixty five': 65,
     'seventy five': 75,
     'ninety five': 95,
+    fifteen: 15,
+    twenty: 20,
+    thirty: 30,
+    forty: 40,
+    fifty: 50,
+    sixty: 60,
   };
 
   for (const [phrase, minutes] of Object.entries(compoundMinutes)) {
@@ -163,6 +177,15 @@ function applyMaterialDefaults(transcript: string, lineItems: InvoiceLineItem[])
   });
 }
 
+function attachAutomation(line: InvoiceLineItem): InvoiceLineItem {
+  const confidenceScore = line.confidenceScore ?? Math.round(line.confidence * 100);
+  return {
+    ...line,
+    confidenceScore,
+    automationStatus: line.automationStatus ?? automationStatusFromScore(confidenceScore),
+  };
+}
+
 function upsertLaborLine(
   lineItems: InvoiceLineItem[],
   minutes: number,
@@ -195,8 +218,8 @@ function upsertLaborLine(
 function extractQuantity(text: string, itemName: string): number {
   const patterns = [
     /(\d+)\s*(hours?|hrs?|hr)\b/i,
-    /(\d+)\s*(units?|each|pieces?|outlets?|filters?|bundles?|ft|feet)\b/i,
-    /\b(one|two|three|four|five|six|seven|eight|nine|ten)\b/i,
+    /(\d+)\s*(units?|each|pieces?|outlets?|filters?|bundles?|ft|feet|foot)\b/i,
+    /\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|twenty|thirty|forty|fifty)\s*(ft|feet|foot)?\b/i,
     /\b(\d+)\b/,
   ];
 
@@ -211,6 +234,15 @@ function extractQuantity(text: string, itemName: string): number {
     eight: 8,
     nine: 9,
     ten: 10,
+    eleven: 11,
+    twelve: 12,
+    thirteen: 13,
+    fourteen: 14,
+    fifteen: 15,
+    twenty: 20,
+    thirty: 30,
+    forty: 40,
+    fifty: 50,
   };
 
   const itemIndex = text.toLowerCase().indexOf(itemName.toLowerCase().slice(0, 8));
@@ -464,7 +496,7 @@ export function runHandshakeEngine(transcript: string): HandshakeResult {
   return {
     status,
     transcript,
-    lineItems,
+    lineItems: lineItems.map(attachAutomation),
     gaps,
     logs,
     subtotal,
