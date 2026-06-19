@@ -75,7 +75,7 @@ export function CatalogPlaygroundCard({ onTryPhrase, disabled = false }: Catalog
         </button>
 
         {sectionOpen && (
-          <div className="space-y-3 border-t border-indigo-500/20 px-3 pb-3 pt-2">
+          <div className="max-h-52 space-y-3 overflow-y-auto border-t border-indigo-500/20 px-3 pb-3 pt-2">
             <p className="text-[10px] text-surface-muted">
               {totalCount} SKUs · {tradeCount} trades
             </p>

@@ -69,8 +69,8 @@ export function VoiceInputPanel({
       : 'Tap to begin voice capture';
 
   return (
-    <div className="flex h-full flex-col">
-      <header className="mb-4 shrink-0">
+    <div className="flex flex-col gap-6">
+      <header className="shrink-0">
         <div className="mb-1 flex items-center gap-2">
           <Sparkles className="h-4 w-4 text-indigo-400" />
           <span className="text-xs font-semibold uppercase tracking-widest text-indigo-400">
@@ -85,7 +85,7 @@ export function VoiceInputPanel({
 
       <CatalogPlaygroundCard onTryPhrase={onSimulateStt} disabled={isActive} />
 
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center">
+      <div className="flex shrink-0 flex-col items-center pt-2">
         <div className="relative mb-8">
           {isListening && (
             <>
@@ -156,7 +156,7 @@ export function VoiceInputPanel({
         </div>
       )}
 
-      <footer className="mt-auto shrink-0 space-y-3 border-t border-surface-border pt-4">
+      <footer className="shrink-0 space-y-3 border-t border-surface-border pt-4">
         <p className="text-xs text-surface-muted">Quick shortcuts</p>
         <div className="flex gap-2">
           <button
