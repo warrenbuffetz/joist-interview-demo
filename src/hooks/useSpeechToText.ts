@@ -9,10 +9,18 @@ export type TranscriptionStatus =
   | 'unsupported';
 
 /** How long to wait after the last heard speech before auto-finalizing. */
-const SILENCE_FINALIZE_MS = 7_000;
+const SILENCE_FINALIZE_MS = 4_000;
 
 /** Hard cap so the mic cannot run indefinitely. */
 const MAX_SESSION_MS = 180_000;
+
+/** Delay before restarting recognition after browser auto-ends (avoids network spam). */
+const RESTART_DELAY_MS = 250;
+
+const MAX_NETWORK_RETRIES = 3;
+
+export const SPEECH_NETWORK_ERROR_MESSAGE =
+  'Voice recognition needs an internet connection — Chrome sends audio to Google’s speech service. Try Chrome or Edge (not Brave), disable VPN/ad blockers, or use the presenter scripts below.';
 
 interface SpeechRecognitionEvent extends Event {
   results: SpeechRecognitionResultList;
@@ -55,7 +63,7 @@ function getSpeechRecognition(): (new () => SpeechRecognitionInstance) | null {
 export interface UseSpeechToTextOptions {
   onFinalTranscript?: (transcript: string) => void;
   lang?: string;
-  /** Ms of silence before auto-stop. Default 7000. */
+  /** Ms of silence before auto-stop. Default 4000. */
   silenceFinalizeMs?: number;
   /** Max listening duration. Default 180000 (3 min). */
   maxSessionMs?: number;
@@ -64,7 +72,10 @@ export interface UseSpeechToTextOptions {
 export interface UseSpeechToTextReturn {
   status: TranscriptionStatus;
   interimTranscript: string;
+  /** Confirmed speech segments accumulated so far this session. */
   finalTranscript: string;
+  /** Confirmed + in-progress text stitched for live display. */
+  liveTranscript: string;
   isListening: boolean;
   isSupported: boolean;
   error: string | null;
@@ -73,6 +84,10 @@ export interface UseSpeechToTextReturn {
   reset: () => void;
   injectTranscript: (text: string) => void;
   completeMapping: () => void;
+}
+
+export function stitchTranscript(confirmed: string, interim: string): string {
+  return [confirmed.trim(), interim.trim()].filter(Boolean).join(' ');
 }
 
 export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeechToTextReturn {
@@ -99,6 +114,8 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
   const finalizedRef = useRef(false);
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const maxSessionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const networkRetryCountRef = useRef(0);
 
   const SpeechRecognitionCtor = getSpeechRecognition();
   const isSupported = SpeechRecognitionCtor !== null;
@@ -117,6 +134,13 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
     }
   }, []);
 
+  const clearRestartTimer = useCallback(() => {
+    if (restartTimerRef.current != null) {
+      clearTimeout(restartTimerRef.current);
+      restartTimerRef.current = null;
+    }
+  }, []);
+
   const buildFullTranscript = useCallback(() => {
     const parts = [accumulatedRef.current.trim(), interimRef.current.trim()].filter(Boolean);
     return parts.join(' ').replace(/\s+/g, ' ').trim();
@@ -132,6 +156,7 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
       clearSilenceTimer();
       clearMaxSessionTimer();
 
+      clearRestartTimer();
       recognitionRef.current?.stop();
 
       const full = buildFullTranscript();
@@ -153,7 +178,7 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
         setStatus('error');
       }
     },
-    [buildFullTranscript, clearMaxSessionTimer, clearSilenceTimer],
+    [buildFullTranscript, clearMaxSessionTimer, clearRestartTimer, clearSilenceTimer],
   );
 
   const scheduleSilenceFinalize = useCallback(() => {
@@ -164,6 +189,19 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
       }
     }, silenceFinalizeMs);
   }, [clearSilenceTimer, finalizeSession, silenceFinalizeMs]);
+
+  const scheduleRecognitionRestart = useCallback((recognition: SpeechRecognitionInstance) => {
+    clearRestartTimer();
+    restartTimerRef.current = setTimeout(() => {
+      if (!sessionActiveRef.current || finalizedRef.current) return;
+      try {
+        recognition.start();
+        networkRetryCountRef.current = 0;
+      } catch {
+        scheduleSilenceFinalize();
+      }
+    }, RESTART_DELAY_MS);
+  }, [clearRestartTimer, scheduleSilenceFinalize]);
 
   useEffect(() => {
     if (!SpeechRecognitionCtor) {
@@ -179,6 +217,7 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
 
     recognition.onstart = () => {
       setError(null);
+      networkRetryCountRef.current = 0;
       if (sessionActiveRef.current) {
         setStatus('listening');
       }
@@ -230,18 +269,30 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
         return;
       }
 
+      // Transient Google speech-service failures — retry a few times before surfacing UI error.
+      if (event.error === 'network' && sessionActiveRef.current && !finalizedRef.current) {
+        if (networkRetryCountRef.current < MAX_NETWORK_RETRIES) {
+          networkRetryCountRef.current += 1;
+          scheduleRecognitionRestart(recognition);
+          return;
+        }
+      }
+
       const errMsg =
         event.error === 'not-allowed'
           ? 'Microphone permission denied. Please allow mic access and retry.'
           : event.error === 'no-speech'
             ? 'No speech detected. Try speaking closer to your microphone.'
-            : `Speech recognition error: ${event.error}`;
+            : event.error === 'network'
+              ? SPEECH_NETWORK_ERROR_MESSAGE
+              : `Speech recognition error: ${event.error}`;
 
       sessionActiveRef.current = false;
       setSessionActive(false);
       finalizedRef.current = true;
       clearSilenceTimer();
       clearMaxSessionTimer();
+      clearRestartTimer();
       setError(errMsg);
       setStatus('error');
     };
@@ -249,11 +300,7 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
     recognition.onend = () => {
       // Chrome/Safari end the recognizer after pauses even in continuous mode — restart while session is open.
       if (sessionActiveRef.current && !finalizedRef.current) {
-        try {
-          recognition.start();
-        } catch {
-          scheduleSilenceFinalize();
-        }
+        scheduleRecognitionRestart(recognition);
         return;
       }
 
@@ -270,6 +317,7 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
     return () => {
       clearSilenceTimer();
       clearMaxSessionTimer();
+      clearRestartTimer();
       recognition.abort();
       recognitionRef.current = null;
     };
@@ -278,7 +326,9 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
     lang,
     clearSilenceTimer,
     clearMaxSessionTimer,
+    clearRestartTimer,
     scheduleSilenceFinalize,
+    scheduleRecognitionRestart,
   ]);
 
   const startListening = useCallback(() => {
@@ -287,6 +337,7 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
     accumulatedRef.current = '';
     interimRef.current = '';
     finalizedRef.current = false;
+    networkRetryCountRef.current = 0;
     sessionActiveRef.current = true;
     setSessionActive(true);
     setInterimTranscript('');
@@ -331,6 +382,7 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
     setSessionActive(false);
     clearSilenceTimer();
     clearMaxSessionTimer();
+    clearRestartTimer();
     recognitionRef.current?.abort();
     accumulatedRef.current = '';
     interimRef.current = '';
@@ -338,7 +390,7 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
     setFinalTranscript('');
     setError(null);
     setStatus('idle');
-  }, [clearMaxSessionTimer, clearSilenceTimer]);
+  }, [clearMaxSessionTimer, clearRestartTimer, clearSilenceTimer]);
 
   const injectTranscript = useCallback((text: string) => {
     setFinalTranscript(text);
@@ -355,6 +407,7 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
     status,
     interimTranscript,
     finalTranscript,
+    liveTranscript: stitchTranscript(finalTranscript, interimTranscript),
     isListening: sessionActive,
     isSupported,
     error,

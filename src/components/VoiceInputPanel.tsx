@@ -25,6 +25,7 @@ interface VoiceInputPanelProps {
   status: TranscriptionStatus;
   interimTranscript: string;
   finalTranscript: string;
+  liveTranscript: string;
   isListening: boolean;
   isSupported: boolean;
   error: string | null;
@@ -42,6 +43,7 @@ export function VoiceInputPanel({
   status,
   interimTranscript,
   finalTranscript,
+  liveTranscript,
   isListening,
   isSupported,
   error,
@@ -54,8 +56,8 @@ export function VoiceInputPanel({
   onApplyCorrection,
   onRunPresenterScript,
 }: VoiceInputPanelProps) {
-  const displayText = interimTranscript || finalTranscript;
   const isActive = isListening || status === 'transcribing' || status === 'mapping';
+  const showInterimCursor = isListening && Boolean(interimTranscript.trim());
 
   return (
     <div className="flex h-full flex-col">
@@ -118,10 +120,16 @@ export function VoiceInputPanel({
             Live Transcript
           </p>
           <div className="min-h-[72px]">
-            {displayText ? (
+            {liveTranscript ? (
               <p className="text-sm leading-relaxed text-white/90">
-                {displayText}
-                {interimTranscript && <span className="terminal-cursor" />}
+                {finalTranscript && <span>{finalTranscript}</span>}
+                {finalTranscript && interimTranscript ? ' ' : null}
+                {interimTranscript && (
+                  <span className={finalTranscript ? 'text-white/55' : undefined}>
+                    {interimTranscript}
+                  </span>
+                )}
+                {showInterimCursor && <span className="terminal-cursor" />}
               </p>
             ) : (
               <p className="text-sm italic text-surface-muted/60">

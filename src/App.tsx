@@ -164,6 +164,10 @@ function App() {
   }, [processTranscript]);
 
   const displayTranscript = activeTranscript || speech.finalTranscript;
+  const panelFinalTranscript = speech.isListening ? speech.finalTranscript : displayTranscript;
+  const panelLiveTranscript = speech.isListening
+    ? speech.liveTranscript
+    : displayTranscript;
 
   return (
     <div className="min-h-screen bg-surface">
@@ -198,7 +202,8 @@ function App() {
             <VoiceInputPanel
               status={isProcessing ? 'mapping' : speech.status}
               interimTranscript={speech.interimTranscript}
-              finalTranscript={displayTranscript}
+              finalTranscript={panelFinalTranscript}
+              liveTranscript={panelLiveTranscript}
               isListening={speech.isListening}
               isSupported={speech.isSupported}
               error={speech.error}
