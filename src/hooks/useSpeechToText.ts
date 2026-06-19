@@ -8,6 +8,12 @@ export type TranscriptionStatus =
   | 'error'
   | 'unsupported';
 
+/** How long to wait after the last heard speech before auto-finalizing. */
+const SILENCE_FINALIZE_MS = 7_000;
+
+/** Hard cap so the mic cannot run indefinitely. */
+const MAX_SESSION_MS = 180_000;
+
 interface SpeechRecognitionEvent extends Event {
   results: SpeechRecognitionResultList;
   resultIndex: number;
@@ -49,6 +55,10 @@ function getSpeechRecognition(): (new () => SpeechRecognitionInstance) | null {
 export interface UseSpeechToTextOptions {
   onFinalTranscript?: (transcript: string) => void;
   lang?: string;
+  /** Ms of silence before auto-stop. Default 7000. */
+  silenceFinalizeMs?: number;
+  /** Max listening duration. Default 180000 (3 min). */
+  maxSessionMs?: number;
 }
 
 export interface UseSpeechToTextReturn {
@@ -66,19 +76,94 @@ export interface UseSpeechToTextReturn {
 }
 
 export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeechToTextReturn {
-  const { onFinalTranscript, lang = 'en-US' } = options;
+  const {
+    onFinalTranscript,
+    lang = 'en-US',
+    silenceFinalizeMs = SILENCE_FINALIZE_MS,
+    maxSessionMs = MAX_SESSION_MS,
+  } = options;
 
   const [status, setStatus] = useState<TranscriptionStatus>('idle');
   const [interimTranscript, setInterimTranscript] = useState('');
   const [finalTranscript, setFinalTranscript] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [sessionActive, setSessionActive] = useState(false);
 
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const onFinalRef = useRef(onFinalTranscript);
   onFinalRef.current = onFinalTranscript;
 
+  const accumulatedRef = useRef('');
+  const interimRef = useRef('');
+  const sessionActiveRef = useRef(false);
+  const finalizedRef = useRef(false);
+  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const maxSessionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const SpeechRecognitionCtor = getSpeechRecognition();
   const isSupported = SpeechRecognitionCtor !== null;
+
+  const clearSilenceTimer = useCallback(() => {
+    if (silenceTimerRef.current != null) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+  }, []);
+
+  const clearMaxSessionTimer = useCallback(() => {
+    if (maxSessionTimerRef.current != null) {
+      clearTimeout(maxSessionTimerRef.current);
+      maxSessionTimerRef.current = null;
+    }
+  }, []);
+
+  const buildFullTranscript = useCallback(() => {
+    const parts = [accumulatedRef.current.trim(), interimRef.current.trim()].filter(Boolean);
+    return parts.join(' ').replace(/\s+/g, ' ').trim();
+  }, []);
+
+  const finalizeSession = useCallback(
+    (reason: 'silence' | 'manual' | 'max_duration') => {
+      if (finalizedRef.current) return;
+      finalizedRef.current = true;
+      sessionActiveRef.current = false;
+      setSessionActive(false);
+
+      clearSilenceTimer();
+      clearMaxSessionTimer();
+
+      recognitionRef.current?.stop();
+
+      const full = buildFullTranscript();
+
+      if (full) {
+        setFinalTranscript(full);
+        setInterimTranscript('');
+        interimRef.current = '';
+        setStatus('mapping');
+        onFinalRef.current?.(full);
+      } else if (reason === 'manual') {
+        setStatus('idle');
+      } else {
+        setError(
+          reason === 'max_duration'
+            ? 'Listening timed out. Tap the mic and try again.'
+            : 'No speech detected. Try speaking closer to your microphone.',
+        );
+        setStatus('error');
+      }
+    },
+    [buildFullTranscript, clearMaxSessionTimer, clearSilenceTimer],
+  );
+
+  const scheduleSilenceFinalize = useCallback(() => {
+    clearSilenceTimer();
+    silenceTimerRef.current = setTimeout(() => {
+      if (sessionActiveRef.current && !finalizedRef.current) {
+        finalizeSession('silence');
+      }
+    }, silenceFinalizeMs);
+  }, [clearSilenceTimer, finalizeSession, silenceFinalizeMs]);
 
   useEffect(() => {
     if (!SpeechRecognitionCtor) {
@@ -87,53 +172,63 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
     }
 
     const recognition = new SpeechRecognitionCtor();
-    recognition.continuous = false;
+    recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = lang;
     recognition.maxAlternatives = 1;
 
     recognition.onstart = () => {
-      setStatus('listening');
       setError(null);
+      if (sessionActiveRef.current) {
+        setStatus('listening');
+      }
     };
 
     recognition.onspeechstart = () => {
-      setStatus('listening');
+      if (sessionActiveRef.current) {
+        setStatus('listening');
+        scheduleSilenceFinalize();
+      }
     };
 
     recognition.onspeechend = () => {
-      setStatus('transcribing');
+      // Pause between phrases — stay in listening; silence timer handles finalize.
+      if (sessionActiveRef.current) {
+        setStatus('listening');
+        scheduleSilenceFinalize();
+      }
     };
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
+      if (!sessionActiveRef.current || finalizedRef.current) return;
+
       let interim = '';
-      let final = '';
 
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
+        const text = result[0]?.transcript ?? '';
         if (result.isFinal) {
-          final += result[0].transcript;
+          accumulatedRef.current = `${accumulatedRef.current} ${text}`.replace(/\s+/g, ' ').trim();
         } else {
-          interim += result[0].transcript;
+          interim += text;
         }
       }
 
-      if (interim) {
-        setInterimTranscript(interim);
-        setStatus('listening');
-      }
-
-      if (final) {
-        const trimmed = final.trim();
-        setFinalTranscript(trimmed);
-        setInterimTranscript('');
-        setStatus('mapping');
-        onFinalRef.current?.(trimmed);
-      }
+      interimRef.current = interim;
+      setInterimTranscript(interim);
+      setFinalTranscript(accumulatedRef.current);
+      setStatus('listening');
+      scheduleSilenceFinalize();
     };
 
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
       if (event.error === 'aborted') return;
+
+      // Browsers fire no-speech during natural pauses — keep session alive if we have audio so far.
+      if (event.error === 'no-speech' && sessionActiveRef.current && !finalizedRef.current) {
+        scheduleSilenceFinalize();
+        return;
+      }
 
       const errMsg =
         event.error === 'not-allowed'
@@ -142,11 +237,26 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
             ? 'No speech detected. Try speaking closer to your microphone.'
             : `Speech recognition error: ${event.error}`;
 
+      sessionActiveRef.current = false;
+      setSessionActive(false);
+      finalizedRef.current = true;
+      clearSilenceTimer();
+      clearMaxSessionTimer();
       setError(errMsg);
       setStatus('error');
     };
 
     recognition.onend = () => {
+      // Chrome/Safari end the recognizer after pauses even in continuous mode — restart while session is open.
+      if (sessionActiveRef.current && !finalizedRef.current) {
+        try {
+          recognition.start();
+        } catch {
+          scheduleSilenceFinalize();
+        }
+        return;
+      }
+
       setStatus((prev) => {
         if (prev === 'listening' || prev === 'transcribing') {
           return 'idle';
@@ -158,17 +268,42 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
     recognitionRef.current = recognition;
 
     return () => {
+      clearSilenceTimer();
+      clearMaxSessionTimer();
       recognition.abort();
       recognitionRef.current = null;
     };
-  }, [SpeechRecognitionCtor, lang]);
+  }, [
+    SpeechRecognitionCtor,
+    lang,
+    clearSilenceTimer,
+    clearMaxSessionTimer,
+    scheduleSilenceFinalize,
+  ]);
 
   const startListening = useCallback(() => {
     if (!recognitionRef.current) return;
 
+    accumulatedRef.current = '';
+    interimRef.current = '';
+    finalizedRef.current = false;
+    sessionActiveRef.current = true;
+    setSessionActive(true);
     setInterimTranscript('');
     setFinalTranscript('');
     setError(null);
+    setStatus('listening');
+
+    clearSilenceTimer();
+    clearMaxSessionTimer();
+
+    maxSessionTimerRef.current = setTimeout(() => {
+      if (sessionActiveRef.current && !finalizedRef.current) {
+        finalizeSession('max_duration');
+      }
+    }, maxSessionMs);
+
+    scheduleSilenceFinalize();
 
     try {
       recognitionRef.current.start();
@@ -176,20 +311,34 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
       recognitionRef.current.stop();
       setTimeout(() => recognitionRef.current?.start(), 100);
     }
-  }, []);
+  }, [
+    clearMaxSessionTimer,
+    clearSilenceTimer,
+    finalizeSession,
+    maxSessionMs,
+    scheduleSilenceFinalize,
+  ]);
 
   const stopListening = useCallback(() => {
-    recognitionRef.current?.stop();
+    if (!sessionActiveRef.current || finalizedRef.current) return;
     setStatus('transcribing');
-  }, []);
+    finalizeSession('manual');
+  }, [finalizeSession]);
 
   const reset = useCallback(() => {
+    sessionActiveRef.current = false;
+    finalizedRef.current = true;
+    setSessionActive(false);
+    clearSilenceTimer();
+    clearMaxSessionTimer();
     recognitionRef.current?.abort();
+    accumulatedRef.current = '';
+    interimRef.current = '';
     setInterimTranscript('');
     setFinalTranscript('');
     setError(null);
     setStatus('idle');
-  }, []);
+  }, [clearMaxSessionTimer, clearSilenceTimer]);
 
   const injectTranscript = useCallback((text: string) => {
     setFinalTranscript(text);
@@ -206,7 +355,7 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
     status,
     interimTranscript,
     finalTranscript,
-    isListening: status === 'listening',
+    isListening: sessionActive,
     isSupported,
     error,
     startListening,
