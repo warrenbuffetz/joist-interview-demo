@@ -112,6 +112,16 @@ export function SmartphonePreview({ result, workflowStage, onReset }: Smartphone
     }
   }, [result?.transcript, result?.status]);
 
+  useEffect(() => {
+    if (workflowStage === 'idle' && !result) {
+      setPhoneView('invoice');
+      setResolvedResult(null);
+      setMediationMode('review');
+      setShowNewCaptureHint(false);
+      setSentMeta({ total: 0, lineCount: 0, invoiceNumber: 'INV-000000' });
+    }
+  }, [workflowStage, result]);
+
   const displayResult = resolvedResult ?? result;
   const handshakeStatus = displayResult?.status ?? 'idle';
   const isHandshakeVerified = handshakeStatus === 'verified';
