@@ -7,6 +7,7 @@ import {
   runHandshakeEngine,
   type HandshakeResult,
   type HandshakeLogEntry,
+  type InputSource,
 } from './engine/handshakeEngine';
 import { DEMO_BILLING_OVERRIDE, DEMO_TRANSCRIPTS } from './data/catalogData';
 import type { PresenterScript } from './data/presenterScripts';
@@ -50,18 +51,22 @@ function App() {
     completeMappingRef.current();
   }, []);
 
-  const processTranscript = useCallback(
-    (transcript: string, billingOverride?: ScenarioBillingOverride) => {
+  const processInputText = useCallback(
+    (
+      inputText: string,
+      source: InputSource,
+      billingOverride?: ScenarioBillingOverride,
+    ) => {
       cancelRun();
       const runId = runIdRef.current;
 
-      setActiveTranscript(transcript);
+      setActiveTranscript(inputText);
       setWorkflowStage('drafting');
       setIsProcessing(true);
       setHandshakeResult(null);
       setDisplayLogs([]);
 
-      let result = runHandshakeEngine(transcript);
+      let result = runHandshakeEngine(inputText, source);
       if (billingOverride) {
         result = applyScenarioBilling(result, billingOverride);
       }
@@ -84,6 +89,16 @@ function App() {
       }
     },
     [cancelRun, finishHandshake],
+  );
+
+  const processVoiceTranscript = useCallback(
+    (transcript: string) => processInputText(transcript, 'voice'),
+    [processInputText],
+  );
+
+  const handleProcessTextNote = useCallback(
+    (text: string) => processInputText(text.trim(), 'text'),
+    [processInputText],
   );
 
   const processHumanCorrection = useCallback(
@@ -119,13 +134,13 @@ function App() {
 
   const processPresenterScript = useCallback(
     (script: PresenterScript) => {
-      processTranscript(script.readAloud, script.billingOverride);
+      processInputText(script.readAloud, 'scenario', script.billingOverride);
     },
-    [processTranscript],
+    [processInputText],
   );
 
   const speech = useSpeechToText({
-    onFinalTranscript: processTranscript,
+    onFinalTranscript: processVoiceTranscript,
   });
 
   useEffect(() => {
@@ -156,12 +171,12 @@ function App() {
   }, [speech]);
 
   const handleDemoVerified = useCallback(() => {
-    processTranscript(DEMO_TRANSCRIPTS.verified, DEMO_BILLING_OVERRIDE);
-  }, [processTranscript]);
+    processInputText(DEMO_TRANSCRIPTS.verified, 'scenario', DEMO_BILLING_OVERRIDE);
+  }, [processInputText]);
 
   const handleDemoAmber = useCallback(() => {
-    processTranscript(DEMO_TRANSCRIPTS.amber);
-  }, [processTranscript]);
+    processInputText(DEMO_TRANSCRIPTS.amber, 'scenario');
+  }, [processInputText]);
 
   const displayTranscript = activeTranscript || speech.finalTranscript;
   const panelFinalTranscript = speech.isListening ? speech.finalTranscript : displayTranscript;
@@ -213,7 +228,9 @@ function App() {
               onReset={handleReset}
               onDemoVerified={handleDemoVerified}
               onDemoAmber={handleDemoAmber}
-              onSimulateStt={processTranscript}
+              onSimulateStt={processVoiceTranscript}
+              onProcessTextNote={handleProcessTextNote}
+              isProcessing={isProcessing}
               onApplyCorrection={processHumanCorrection}
               onRunPresenterScript={processPresenterScript}
               hasCompletedSession={hasCompletedSession}

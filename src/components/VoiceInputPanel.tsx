@@ -3,6 +3,7 @@ import type { TranscriptionStatus } from '../hooks/useSpeechToText';
 import type { PresenterScript } from '../data/presenterScripts';
 import { PresenterScripts } from './PresenterScripts';
 import { CatalogPlaygroundCard } from './CatalogPlaygroundCard';
+import { TextNotePanel } from './TextNotePanel';
 
 const STATUS_LABELS: Record<TranscriptionStatus, string> = {
   idle: 'Ready to capture',
@@ -38,6 +39,8 @@ interface VoiceInputPanelProps {
   onSimulateStt: (transcript: string) => void;
   onApplyCorrection: (transcript: string) => void;
   onRunPresenterScript: (script: PresenterScript) => void;
+  onProcessTextNote: (text: string) => void;
+  isProcessing?: boolean;
   hasCompletedSession?: boolean;
 }
 
@@ -57,6 +60,8 @@ export function VoiceInputPanel({
   onSimulateStt,
   onApplyCorrection,
   onRunPresenterScript,
+  onProcessTextNote,
+  isProcessing = false,
   hasCompletedSession = false,
 }: VoiceInputPanelProps) {
   const isActive = isListening || status === 'transcribing' || status === 'mapping';
@@ -79,7 +84,7 @@ export function VoiceInputPanel({
         </div>
         <h2 className="text-xl font-semibold tracking-tight">Voice Input Interface</h2>
         <p className="mt-1 text-sm text-surface-muted">
-          Speak naturally — Joist maps your words to verified catalog SKUs.
+          Speak or type a field note — Joist maps it to verified catalog SKUs.
         </p>
       </header>
 
@@ -148,6 +153,19 @@ export function VoiceInputPanel({
           </div>
         </div>
       </div>
+
+      <div className="flex shrink-0 items-center gap-3">
+        <span className="h-px flex-1 bg-surface-border" />
+        <span className="text-[10px] font-medium uppercase tracking-widest text-surface-muted">
+          or
+        </span>
+        <span className="h-px flex-1 bg-surface-border" />
+      </div>
+
+      <TextNotePanel
+        onProcessTextNote={onProcessTextNote}
+        disabled={isProcessing || isListening}
+      />
 
       {error && (
         <div className="mb-4 flex items-start gap-2 rounded-xl border border-trust-error/30 bg-trust-error/10 p-3">

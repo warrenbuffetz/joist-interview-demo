@@ -8,6 +8,14 @@ import { computeTax, computeTotalWithTax } from '../utils/tax';
 
 export type TrustStatus = 'idle' | 'processing' | 'verified' | 'amber_alert';
 
+export type InputSource = 'voice' | 'text' | 'scenario';
+
+const SOURCE_LABEL: Record<InputSource, string> = {
+  voice: 'Voice Capture',
+  text: 'Text Note',
+  scenario: 'Demo Scenario',
+};
+
 export interface InvoiceLineItem {
   sku: string;
   name: string;
@@ -365,11 +373,22 @@ function detectGaps(transcript: string, matchedItems: InvoiceLineItem[]): TrustG
  * 3. Pricing validation
  * 4. Trust scoring & gap detection
  */
-export function runHandshakeEngine(transcript: string): HandshakeResult {
+export function runHandshakeEngine(
+  transcript: string,
+  source: InputSource = 'voice',
+): HandshakeResult {
   logCounter = 0;
   const logs: HandshakeLogEntry[] = [];
 
-  logs.push(createLog('info', 'intake', `[INTAKE] Received voice transcript (${transcript.length} chars)`));
+  logs.push(createLog('info', 'intake', `[INPUT] Source: ${SOURCE_LABEL[source]}`));
+  logs.push(
+    createLog(
+      'info',
+      'intake',
+      `[INPUT] Raw note: "${transcript.slice(0, 80)}${transcript.length > 80 ? '…' : ''}"`,
+    ),
+  );
+  logs.push(createLog('info', 'intake', `[INTAKE] Received ${SOURCE_LABEL[source].toLowerCase()} (${transcript.length} chars)`));
   logs.push(createLog('info', 'normalize', `[NORMALIZE] Tokenizing and normalizing speech patterns…`));
 
   const normalized = normalizeText(transcript);
