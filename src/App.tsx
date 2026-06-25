@@ -11,10 +11,7 @@ import {
 } from './engine/handshakeEngine';
 import { DEMO_BILLING_OVERRIDE, DEMO_TRANSCRIPTS } from './data/catalogData';
 import type { PresenterScript } from './data/presenterScripts';
-import {
-  applyScenarioBilling,
-  type ScenarioBillingOverride,
-} from './utils/scenarioBilling';
+import type { ScenarioBillingOverride } from './utils/scenarioBilling';
 import { finalizeHumanCorrectedResult } from './utils/invoiceTotals';
 
 type WorkflowStage = 'idle' | 'listening' | 'drafting' | 'complete';
@@ -66,10 +63,7 @@ function App() {
       setHandshakeResult(null);
       setDisplayLogs([]);
 
-      let result = runHandshakeEngine(inputText, source);
-      if (billingOverride) {
-        result = applyScenarioBilling(result, billingOverride);
-      }
+      const result = runHandshakeEngine(inputText, source, billingOverride);
       const validLogs = result.logs.filter(isValidLog);
 
       // Stream logs one at a time using slice — no index-based access

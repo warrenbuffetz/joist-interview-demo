@@ -1,8 +1,7 @@
 import { CatalogData } from '../data/catalogData';
-import type { HandshakeResult, InvoiceLineItem } from '../engine/handshakeEngine';
+import type { InvoiceLineItem } from '../engine/handshakeEngine';
 import { lineItemFromCatalog, lineItemFromLabor } from './invoiceTotals';
 import { isLaborSku, LABOR_SKU } from './laborTime';
-import { computeTax, computeTotalWithTax } from './tax';
 
 import type { AutomationStatus } from '../types/automationStatus';
 import { automationStatusFromScore } from '../types/automationStatus';
@@ -93,13 +92,18 @@ function buildCanonicalLineItems(specs: ScenarioLineItemSpec[]): InvoiceLineItem
     .filter((line): line is InvoiceLineItem => line != null);
 }
 
-export function applyScenarioBilling(
-  result: HandshakeResult,
+/**
+ * Pure transform: applies a demo billing override to draft line items and returns the
+ * final canonical line items. Trust gaps, status, totals, and logs are computed downstream
+ * by the engine's finalize step so the trust log and preview share one source of truth.
+ */
+export function resolveScenarioLineItems(
+  draftLineItems: InvoiceLineItem[],
   override: ScenarioBillingOverride,
-): HandshakeResult {
+): InvoiceLineItem[] {
   let lineItems: InvoiceLineItem[] = override.lineItems
     ? buildCanonicalLineItems(override.lineItems)
-    : [...result.lineItems];
+    : [...draftLineItems];
 
   if (!override.lineItems) {
     for (const material of override.materials ?? []) {
@@ -137,21 +141,5 @@ export function applyScenarioBilling(
     }
   }
 
-  const withAutomation = applyLineItemAutomation(lineItems, override.lineItemAutomation);
-
-  const subtotal =
-    Math.round(withAutomation.reduce((sum, item) => sum + item.lineTotal, 0) * 100) / 100;
-  const tax = computeTax(subtotal);
-  const total = computeTotalWithTax(subtotal);
-
-  return {
-    ...result,
-    status: 'verified',
-    lineItems: withAutomation,
-    gaps: [],
-    subtotal,
-    tax,
-    total,
-    trustScore: 1,
-  };
+  return applyLineItemAutomation(lineItems, override.lineItemAutomation);
 }

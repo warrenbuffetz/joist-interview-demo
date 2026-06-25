@@ -2,9 +2,14 @@ import { CatalogData, type CatalogItem } from '../data/catalogData';
 import { MATERIAL_DEFAULT_QUANTITIES } from '../data/materialDefaults';
 import type { LineItemType } from '../types/invoice';
 import type { AutomationStatus } from '../types/automationStatus';
-import { automationStatusFromScore } from '../types/automationStatus';
-import { computeLaborLineTotal, LABOR_SKU } from '../utils/laborTime';
+import { automationStatusFromScore, computeInvoiceAggregateStatus } from '../types/automationStatus';
+import { computeLaborLineTotal, isLaborSku, LABOR_SKU } from '../utils/laborTime';
 import { computeTax, computeTotalWithTax } from '../utils/tax';
+import { resolveScenarioLineItems, type ScenarioBillingOverride } from '../utils/scenarioBilling';
+
+/** Heuristic thresholds for flagging implausible quantities on high-value SKUs. */
+const HIGH_VALUE_USD = 100;
+const MAX_TYPICAL_EACH_QTY = 3;
 
 export type TrustStatus = 'idle' | 'processing' | 'verified' | 'amber_alert';
 
@@ -37,7 +42,7 @@ export interface InvoiceLineItem {
 }
 
 export interface TrustGap {
-  type: 'missing_price' | 'ambiguous_item' | 'unmatched_item';
+  type: 'missing_price' | 'ambiguous_item' | 'unmatched_item' | 'unusual_quantity';
   message: string;
   rawFragment: string;
 }
@@ -361,6 +366,22 @@ function detectGaps(transcript: string, matchedItems: InvoiceLineItem[]): TrustG
     }
   }
 
+  // Unusual quantity for high-value, single-unit SKUs (e.g. 15 smart thermostats).
+  for (const line of matchedItems) {
+    if (line.itemType === 'labor' || isLaborSku(line.sku)) continue;
+    if (
+      line.unit === 'each' &&
+      line.unitPrice >= HIGH_VALUE_USD &&
+      line.quantity > MAX_TYPICAL_EACH_QTY
+    ) {
+      gaps.push({
+        type: 'unusual_quantity',
+        message: `Unusual quantity for ${line.name} (${line.quantity}) — confirm before sending.`,
+        rawFragment: line.sku,
+      });
+    }
+  }
+
   return gaps;
 }
 
@@ -376,6 +397,7 @@ function detectGaps(transcript: string, matchedItems: InvoiceLineItem[]): TrustG
 export function runHandshakeEngine(
   transcript: string,
   source: InputSource = 'voice',
+  billingOverride?: ScenarioBillingOverride,
 ): HandshakeResult {
   logCounter = 0;
   const logs: HandshakeLogEntry[] = [];
@@ -400,13 +422,6 @@ export function runHandshakeEngine(
   let lineItems: InvoiceLineItem[] = catalogMatches.map(({ item, alias, confidence }) => {
     const quantity = extractQuantity(transcript, alias);
     const lineTotal = Math.round(quantity * item.unitPrice * 100) / 100;
-    logs.push(
-      createLog(
-        'success',
-        'catalog',
-        `[MATCH] ${item.sku} ← "${alias}" (qty: ${quantity}, conf: ${(confidence * 100).toFixed(0)}%)`,
-      ),
-    );
     return {
       sku: item.sku,
       name: item.name,
@@ -468,24 +483,70 @@ export function runHandshakeEngine(
       crewSize,
       inferredCrewSize != null ? 'crew plural attribution' : 'duration attribution',
     );
-    logs.push(
-      createLog(
-        'success',
-        'catalog',
-        `[MATCH] ${LABOR_SKU} ← labor attribution (duration: ${durationMinutes}m, crew: ${crewSize}, conf: 96%)`,
-      ),
-    );
+  }
+
+  // Fold any demo billing override in BEFORE finalization so gaps, trust, status, and
+  // every [MATCH]/[GAP]/[TRUST] log are derived from the same final line items the
+  // smartphone preview renders.
+  if (billingOverride) {
+    lineItems = resolveScenarioLineItems(lineItems, billingOverride);
+  }
+
+  return finalizeHandshakeResult(transcript, lineItems, logs);
+}
+
+/**
+ * Finalize a draft invoice into the canonical {@link HandshakeResult}. This is the single
+ * source of truth: trust gaps, [MATCH]/[GAP]/[TRUST] logs, totals, and the unified trust
+ * status are ALL derived from `rawLineItems` (the final line items), so the trust log in
+ * Column 2 and the smartphone preview in Column 3 can never disagree.
+ */
+function finalizeHandshakeResult(
+  transcript: string,
+  rawLineItems: InvoiceLineItem[],
+  logs: HandshakeLogEntry[],
+): HandshakeResult {
+  const gaps = detectGaps(transcript, rawLineItems);
+  const flaggedSkus = new Set(
+    gaps.filter((gap) => gap.type === 'unusual_quantity').map((gap) => gap.rawFragment),
+  );
+
+  const lineItems: InvoiceLineItem[] = rawLineItems.map((line) => {
+    const withAutomation = attachAutomation(line);
+    // A flagged line must read "Review Quantities" in the preview to match the amber banner.
+    return flaggedSkus.has(line.sku)
+      ? { ...withAutomation, automationStatus: 'medium' as AutomationStatus }
+      : withAutomation;
+  });
+
+  for (const line of lineItems) {
+    if (line.itemType === 'labor' || isLaborSku(line.sku)) {
+      const minutes = line.durationMinutes ?? Math.round(line.quantity * 60);
+      logs.push(
+        createLog(
+          'success',
+          'catalog',
+          `[MATCH] ${line.sku} ← labor attribution (duration: ${minutes}m, crew: ${line.crewSize ?? 1}, conf: ${(line.confidence * 100).toFixed(0)}%)`,
+        ),
+      );
+    } else {
+      logs.push(
+        createLog(
+          'success',
+          'catalog',
+          `[MATCH] ${line.sku} ← "${line.matchedFrom}" (qty: ${line.quantity}, conf: ${(line.confidence * 100).toFixed(0)}%)`,
+        ),
+      );
+    }
   }
 
   logs.push(createLog('info', 'pricing', `[PRICING] Validating line-item pricing against catalog…`));
-
-  const gaps = detectGaps(transcript, lineItems);
 
   for (const gap of gaps) {
     logs.push(createLog('warn', 'pricing', `[GAP] ${gap.type}: ${gap.message}`));
   }
 
-  const subtotal = lineItems.reduce((sum, item) => sum + item.lineTotal, 0);
+  const subtotal = Math.round(lineItems.reduce((sum, item) => sum + item.lineTotal, 0) * 100) / 100;
   const tax = computeTax(subtotal);
   const total = computeTotalWithTax(subtotal);
 
@@ -496,10 +557,14 @@ export function runHandshakeEngine(
   const gapPenalty = gaps.length * 0.15;
   const trustScore = Math.max(0, Math.min(1, avgConfidence - gapPenalty));
 
-  let status: TrustStatus;
+  // Unified status: amber if there are gaps OR no items OR any line still needs review.
+  // This is the SAME signal the preview uses (computeInvoiceAggregateStatus), so the
+  // [TRUST] log and the preview badge always agree.
+  const aggregate = computeInvoiceAggregateStatus(lineItems);
+  const needsReview = gaps.length > 0 || lineItems.length === 0 || aggregate !== 'ready';
+  const status: TrustStatus = needsReview ? 'amber_alert' : 'verified';
 
-  if (gaps.length > 0 || lineItems.length === 0) {
-    status = 'amber_alert';
+  if (status === 'amber_alert') {
     logs.push(
       createLog(
         'warn',
@@ -507,9 +572,16 @@ export function runHandshakeEngine(
         `[TRUST] Score: ${(trustScore * 100).toFixed(0)}% — AMBER ALERT: Manual review required`,
       ),
     );
-    logs.push(createLog('warn', 'complete', `[COMPLETE] Invoice drafted with ${gaps.length} trust gap(s)`));
+    logs.push(
+      createLog(
+        'warn',
+        'complete',
+        gaps.length > 0
+          ? `[COMPLETE] Invoice drafted with ${gaps.length} trust gap(s)`
+          : `[COMPLETE] Invoice drafted — line items flagged for review`,
+      ),
+    );
   } else {
-    status = 'verified';
     logs.push(
       createLog('success', 'trust', `[TRUST] Score: ${(trustScore * 100).toFixed(0)}% — VERIFIED ✓`),
     );
@@ -519,7 +591,7 @@ export function runHandshakeEngine(
   return {
     status,
     transcript,
-    lineItems: lineItems.map(attachAutomation),
+    lineItems,
     gaps,
     logs,
     subtotal,
